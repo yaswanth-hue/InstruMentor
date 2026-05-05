@@ -128,105 +128,134 @@ const HomePage = () => {
   }, []);
 
   return (
-    <div className="min-h-screen p-8 bg-gradient-to-br from-yellow-50 via-pink-100 to-purple-200 font-sans">
-      {/* Header */}
-      <div
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50" style={{width: '100%', maxWidth: 'none'}}>
+      {/* Modern Header with Glass Effect */}
+      <header
         ref={headerRef}
-        className="flex justify-between items-center mb-10 opacity-0 -translate-y-10 w-full"
+        className="sticky top-0 z-50 opacity-0 -translate-y-10 bg-white/80 backdrop-blur-lg border-b border-gray-200/50 shadow-sm"
       >
-        <div className="cursor-pointer" onClick={() => navigate("/")}>
-          <LogoWithText />
+        <div className="w-full px-4 sm:px-6 lg:px-8 py-4" style={{width: '100%', maxWidth: 'none'}}>
+          <div className="flex items-center justify-between">
+            {/* Logo */}
+            <div className="cursor-pointer hover:scale-105 transition-transform" onClick={() => navigate("/")}>
+              <LogoWithText />
+            </div>
+
+            {/* Desktop Navigation */}
+            <nav className="hidden lg:flex items-center gap-2">
+              <button
+                onClick={() => navigate("/audio-rooms")}
+                className="group relative px-4 py-2.5 text-sm font-medium text-gray-700 hover:text-green-600 transition-colors rounded-lg hover:bg-green-50"
+              >
+                <span className="flex items-center gap-2">
+                  🎤 <span>Audio Rooms</span>
+                </span>
+              </button>
+              <button
+                onClick={() => navigate("/social-feed")}
+                className="group relative px-4 py-2.5 text-sm font-medium text-gray-700 hover:text-blue-600 transition-colors rounded-lg hover:bg-blue-50"
+              >
+                <span className="flex items-center gap-2">
+                  🌟 <span>Social Feed</span>
+                </span>
+              </button>
+              <button
+                onClick={() => navigate("/courses")}
+                className="group relative px-4 py-2.5 text-sm font-medium text-gray-700 hover:text-orange-600 transition-colors rounded-lg hover:bg-orange-50"
+              >
+                <span className="flex items-center gap-2">
+                  📚 <span>Courses</span>
+                </span>
+              </button>
+              <div className="w-px h-6 bg-gray-300 mx-2"></div>
+              <button
+                onClick={() => navigate("/add-resource")}
+                className="px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 rounded-lg shadow-md hover:shadow-lg transition-all"
+              >
+                + Add Resource
+              </button>
+              <button
+                onClick={() => navigate("/manage-resources")}
+                className="px-4 py-2.5 text-sm font-medium text-gray-700 hover:text-purple-700 border border-gray-300 hover:border-purple-400 rounded-lg transition-colors hover:bg-purple-50"
+              >
+                Manage
+              </button>
+              <button
+                onClick={() => navigate("/profile")}
+                className="px-4 py-2.5 text-sm font-medium text-gray-700 hover:text-purple-700 border border-gray-300 hover:border-purple-400 rounded-lg transition-colors hover:bg-purple-50"
+              >
+                Profile
+              </button>
+            </nav>
+
+            {/* Mobile Menu Button - Could be expanded in future */}
+            <div className="lg:hidden flex items-center gap-2">
+              <button
+                onClick={() => navigate("/profile")}
+                className="p-2 text-gray-700 hover:text-purple-700 transition-colors"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {/* Mobile Navigation */}
+          <div className="lg:hidden mt-4 grid grid-cols-2 gap-2">
+            <button
+              onClick={() => navigate("/audio-rooms")}
+              className="px-3 py-2 text-sm font-medium text-gray-700 hover:text-green-600 bg-green-50 rounded-lg transition-colors"
+            >
+              🎤 Audio Rooms
+            </button>
+            <button
+              onClick={() => navigate("/social-feed")}
+              className="px-3 py-2 text-sm font-medium text-gray-700 hover:text-blue-600 bg-blue-50 rounded-lg transition-colors"
+            >
+              🌟 Social Feed
+            </button>
+            <button
+              onClick={() => navigate("/courses")}
+              className="px-3 py-2 text-sm font-medium text-gray-700 hover:text-orange-600 bg-orange-50 rounded-lg transition-colors"
+            >
+              📚 Courses
+            </button>
+            <button
+              onClick={() => navigate("/add-resource")}
+              className="px-3 py-2 text-sm font-semibold text-white bg-gradient-to-r from-purple-600 to-indigo-600 rounded-lg"
+            >
+              + Add Resource
+            </button>
+            <button
+              onClick={() => navigate("/manage-resources")}
+              className="px-3 py-2 text-sm font-medium text-purple-700 border border-purple-300 rounded-lg"
+            >
+              Manage
+            </button>
+            <button
+              onClick={() => navigate("/profile")}
+              className="px-3 py-2 text-sm font-medium text-purple-700 border border-purple-300 rounded-lg"
+            >
+              Profile
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Hero Section */}
+      <div className="w-full px-4 sm:px-6 lg:px-8 pt-12 pb-8" style={{width: '100%', maxWidth: 'none'}}>
+        <div className="text-center mb-12">
+          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-pink-600 mb-4">
+            🎵 Choose Your Instrument
+          </h1>
+          <p className="text-lg text-gray-600 w-full">
+            Explore resources, learn from experts, and master your favorite instrument
+          </p>
         </div>
 
-        {/* Desktop Buttons */}
-        <div className="hidden sm:flex gap-4 flex-wrap justify-end items-center">
-          <button
-            onClick={() => navigate("/audio-rooms")}
-            className="bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition"
-          >
-            🎤 Audio Rooms
-          </button>
-          <button
-            onClick={() => navigate("/social-feed")}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition"
-          >
-            🌟 Social Feed
-          </button>
-          <button
-            onClick={() => navigate("/courses")}
-            className="bg-orange-600 hover:bg-orange-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition"
-          >
-            📚 Courses
-          </button>
-          <button
-            onClick={() => navigate("/add-resource")}
-            className="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition"
-          >
-            + Add Resource
-          </button>
-          <button
-            onClick={() => navigate("/manage-resources")}
-            className="bg-white border border-purple-600 text-purple-700 hover:bg-purple-50 font-medium px-4 py-2 rounded-lg shadow"
-          >
-            Manage Resources
-          </button>
-          <button
-            onClick={() => navigate("/profile")}
-            className="bg-white border border-purple-600 text-purple-700 hover:bg-purple-50 font-medium px-4 py-2 rounded-lg shadow"
-          >
-            Profile
-          </button>
-
-        </div>
-      </div>
-
-      {/* Mobile Buttons */}
-      <div className="flex gap-4 flex-wrap justify-center mb-6 sm:hidden">
-        <button
-          onClick={() => navigate("/audio-rooms")}
-          className="bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition w-full"
-        >
-          🎤 Audio Rooms
-        </button>
-        <button
-          onClick={() => navigate("/social-feed")}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition w-full"
-        >
-          🌟 Social Feed
-        </button>
-        <button
-          onClick={() => navigate("/courses")}
-          className="bg-orange-600 hover:bg-orange-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition w-full"
-        >
-          📚 Courses
-        </button>
-        <button
-          onClick={() => navigate("/add-resource")}
-          className="bg-purple-600 hover:bg-purple-700 text-white font-semibold px-4 py-2 rounded-lg shadow transition w-full"
-        >
-          + Add Resource
-        </button>
-        <button
-          onClick={() => navigate("/manage-resources")}
-          className="bg-white border border-purple-600 text-purple-700 hover:bg-purple-50 font-medium px-4 py-2 rounded-lg shadow w-full"
-        >
-          Manage Resources
-        </button>
-        <button
-          onClick={() => navigate("/profile")}
-          className="bg-white border border-purple-600 text-purple-700 hover:bg-purple-50 font-medium px-4 py-2 rounded-lg shadow w-full"
-        >
-          Profile
-        </button>
-
-      </div>
-
-      {/* Instrument Grid */}
-      <div>
-        <h2 className="text-3xl font-extrabold text-purple-700 mb-6">
-          🎵 Choose Your Instrument
-        </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+        {/* Instrument Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {instruments.map((instrument, index) => {
             const handleMouseEnter = () => {
               if (!audioRefs.current[instrument.name]) {
@@ -251,36 +280,50 @@ const HomePage = () => {
               <div
                 key={instrument.name}
                 ref={(el) => (cardRefs.current[index] = el)}
-                className="opacity-0 translate-y-6 bg-white bg-opacity-70 backdrop-blur-md rounded-2xl shadow-md hover:shadow-lg transition duration-300 cursor-pointer transform hover:scale-[1.02]"
-                onClick={() => navigate(`/instrument/${instrument.name}`)}
+                className="group opacity-0 translate-y-6"
                 onMouseEnter={handleMouseEnter}
                 onMouseLeave={handleMouseLeave}
               >
-                <div className="bg-purple-100 h-40 sm:h-48 md:h-56 lg:h-64 flex items-center justify-center rounded-t-2xl overflow-hidden">
-                  <img
-                    src={instrument.image}
-                    alt={instrument.name}
-                    className="h-full object-contain p-4"
-                  />
-                </div>
-                <div className="p-5" onClick={(e) => e.stopPropagation()}>
-                  <h3 className="text-lg font-semibold capitalize text-gray-800 mb-2">
-                    {instrument.name}
-                  </h3>
-                  <p className="text-sm text-gray-600 mb-4">
-                    Explore resources and start learning
-                  </p>
-                  <button
-                    className="w-full bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 rounded-lg shadow transition"
-                    onClick={() =>
-                      window.open(
-                        instrument.virtualLink,
-                        "_blank"
-                      )
-                    }
-                  >
-                    Try Virtual {instrument.name.charAt(0).toUpperCase() + instrument.name.slice(1)}
-                  </button>
+                <div className="relative bg-white rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-300 overflow-hidden border border-gray-100 cursor-pointer transform hover:-translate-y-2"
+                  onClick={() => navigate(`/instrument/${instrument.name}`)}
+                >
+                  {/* Image Container with Gradient Overlay */}
+                  <div className="relative h-48 sm:h-56 bg-gradient-to-br from-purple-100 via-pink-100 to-indigo-100 flex items-center justify-center overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                    <img
+                      src={instrument.image}
+                      alt={instrument.name}
+                      className="h-full object-contain p-6 transform group-hover:scale-110 transition-transform duration-500"
+                    />
+                    {/* Floating Badge */}
+                    <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full text-xs font-semibold text-purple-600 shadow-md">
+                      Popular
+                    </div>
+                  </div>
+
+                  {/* Card Content */}
+                  <div className="p-6" onClick={(e) => e.stopPropagation()}>
+                    <h3 className="text-xl font-bold capitalize text-gray-900 mb-2 group-hover:text-purple-600 transition-colors">
+                      {instrument.name}
+                    </h3>
+                    <p className="text-sm text-gray-500 mb-4 line-clamp-2">
+                      Explore resources, tutorials and start your musical journey
+                    </p>
+
+                    {/* Action Button */}
+                    <button
+                      className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold py-3 px-4 rounded-xl shadow-md hover:shadow-lg transition-all duration-300 flex items-center justify-center gap-2 group/btn"
+                      onClick={() => window.open(instrument.virtualLink, "_blank")}
+                    >
+                      <span>Try Virtual {instrument.name.charAt(0).toUpperCase() + instrument.name.slice(1)}</span>
+                      <svg className="w-4 h-4 transform group-hover/btn:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {/* Bottom Accent Line */}
+                  <div className="h-1 bg-gradient-to-r from-purple-500 via-pink-500 to-indigo-500 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-left"></div>
                 </div>
               </div>
             );

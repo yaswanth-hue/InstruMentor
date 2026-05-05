@@ -15,12 +15,12 @@ import {
   arrayUnion,
   arrayRemove 
 } from 'firebase/firestore';
-import { 
-  BookOpen, 
-  Users, 
-  Calendar, 
-  Video, 
-  Plus, 
+import {
+  BookOpen,
+  Users,
+  Calendar,
+  Video,
+  Plus,
   Clock,
   User,
   ArrowLeft,
@@ -28,10 +28,17 @@ import {
   FileText,
   ExternalLink,
   BarChart3,
-  PlayCircle
+  PlayCircle,
+  GraduationCap,
+  Award,
+  Sparkles,
+  TrendingUp,
+  UserPlus,
+  Download,
+  Link as LinkIcon
 } from 'lucide-react';
-import CourseMeetingScheduler from '../components/CourseMeetingScheduler';
 import CourseProgressDashboard from '../components/CourseProgressDashboard';
+import CourseContentHub from '../components/CourseContentHub';
 
 const CoursePage = () => {
   const { courseId } = useParams();
@@ -41,16 +48,8 @@ const CoursePage = () => {
   const [creatorProfile, setCreatorProfile] = useState(null);
   const [isEnrolled, setIsEnrolled] = useState(false);
   const [isCreator, setIsCreator] = useState(false);
-  const [showCreateMeeting, setShowCreateMeeting] = useState(false);
-  const [showAddMaterial, setShowAddMaterial] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
-  const [newMeeting, setNewMeeting] = useState({
-    title: '',
-    description: '',
-    scheduledTime: ''
-  });
-  const [newMaterial, setNewMaterial] = useState('');
   
   const currentUserId = auth.currentUser?.uid;
 
@@ -111,85 +110,29 @@ const CoursePage = () => {
     }
   };
 
-  const handleCreateMeeting = async () => {
-    if (!newMeeting.title.trim() || !newMeeting.scheduledTime) {
-      alert('Please fill in all required fields');
-      return;
-    }
-
-    try {
-      const enrolledUsers = course.enrolledUsers || [];
-      const participants = [currentUserId, ...enrolledUsers];
-
-      await createMeeting({
-        courseId: courseId,
-        title: newMeeting.title,
-        description: newMeeting.description,
-        scheduledTime: new Date(newMeeting.scheduledTime),
-        participants: participants
-      });
-
-      setShowCreateMeeting(false);
-      setNewMeeting({ title: '', description: '', scheduledTime: '' });
-      loadCourseData(); // Reload meetings
-    } catch (error) {
-      console.error('Error creating meeting:', error);
-      alert('Failed to create meeting');
-    }
-  };
-
-  const handleAddMaterial = async () => {
-    if (!newMaterial.trim()) return;
-
-    try {
-      const courseRef = doc(db, 'courses', courseId);
-      await updateDoc(courseRef, {
-        materials: arrayUnion(newMaterial)
-      });
-
-      setShowAddMaterial(false);
-      setNewMaterial('');
-      loadCourseData(); // Reload course data
-    } catch (error) {
-      console.error('Error adding material:', error);
-      alert('Failed to add material');
-    }
-  };
-
-  const handleRemoveMaterial = async (material) => {
-    try {
-      const courseRef = doc(db, 'courses', courseId);
-      await updateDoc(courseRef, {
-        materials: arrayRemove(material)
-      });
-      loadCourseData(); // Reload course data
-    } catch (error) {
-      console.error('Error removing material:', error);
-      alert('Failed to remove material');
-    }
-  };
-
-  const joinMeeting = (meetingId) => {
-    // Navigate to meeting room for this meeting
-    navigate(`/meeting/${meetingId}`);
-  };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center" style={{width: '100%', maxWidth: 'none'}}>
+        <div className="flex flex-col items-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-purple-600"></div>
+          <p className="mt-4 text-gray-600 font-medium">Loading course...</p>
+        </div>
       </div>
     );
   }
 
   if (!course) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center" style={{width: '100%', maxWidth: 'none'}}>
         <div className="text-center">
+          <div className="bg-white rounded-full p-6 shadow-lg mb-4 inline-block">
+            <BookOpen className="w-16 h-16 text-gray-400" />
+          </div>
           <h2 className="text-2xl font-bold text-gray-700 mb-2">Course not found</h2>
           <button
             onClick={() => navigate('/courses')}
-            className="text-purple-600 hover:text-purple-700"
+            className="mt-4 px-6 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold hover:shadow-lg transition-all duration-300"
           >
             Back to Courses
           </button>
@@ -199,77 +142,140 @@ const CoursePage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white shadow-sm">
-        <div className="max-w-6xl mx-auto px-4 py-6">
-          <div className="flex items-center gap-4 mb-4">
-            <button
-              onClick={() => navigate('/courses')}
-              className="text-gray-600 hover:text-gray-800"
-            >
-              <ArrowLeft className="w-6 h-6" />
-            </button>
-            <div className="flex-1">
-              <h1 className="text-3xl font-bold text-gray-800">{course.title}</h1>
-              <p className="text-gray-600 mt-1">{course.description}</p>
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50" style={{width: '100%', maxWidth: 'none'}}>
+      {/* Hero Header with Gradient */}
+      <div className="bg-gradient-to-r from-purple-600 via-pink-500 to-blue-500 shadow-lg relative overflow-hidden">
+        {/* Decorative background elements */}
+        <div className="absolute inset-0 bg-black/10"></div>
+        <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full blur-3xl"></div>
+        <div className="absolute bottom-0 left-0 w-96 h-96 bg-white/10 rounded-full blur-3xl"></div>
+
+        <div className="relative w-full px-4 sm:px-6 py-6 sm:py-8" style={{width: '100%', maxWidth: 'none'}}>
+          {/* Back Button */}
+          <button
+            onClick={() => navigate('/courses')}
+            className="mb-4 flex items-center gap-2 text-white/90 hover:text-white transition-colors duration-300 group"
+          >
+            <ArrowLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform duration-300" />
+            <span className="font-medium">Back to Courses</span>
+          </button>
+
+          {/* Course Header */}
+          <div className="flex items-start gap-4 mb-6">
+            <div className="bg-white/20 backdrop-blur-sm p-3 sm:p-4 rounded-2xl shadow-lg flex-shrink-0">
+              <GraduationCap className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white drop-shadow-lg mb-2 animate-fadeIn">
+                {course.title}
+              </h1>
+              <p className="text-base sm:text-lg text-white/90 leading-relaxed animate-slideDown">
+                {course.description}
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-6 text-sm text-gray-600">
-            <div className="flex items-center gap-2">
-              <User className="w-4 h-4" />
-              <span>Instructor: {creatorProfile?.displayName || 'Unknown'}</span>
+          {/* Stats Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-6">
+            <div className="bg-white/10 backdrop-blur-md rounded-xl p-3 sm:p-4 border border-white/20 hover:bg-white/20 transition-all duration-300">
+              <div className="flex items-center gap-2 mb-1">
+                <User className="w-4 h-4 text-white/80" />
+                <span className="text-xs text-white/80">Instructor</span>
+              </div>
+              <p className="font-bold text-white text-sm sm:text-base truncate">
+                {creatorProfile?.displayName || 'Unknown'}
+              </p>
             </div>
-            <div className="flex items-center gap-2">
-              <Users className="w-4 h-4" />
-              <span>{course.enrolledUsers?.length || 0} students enrolled</span>
+
+            <div className="bg-white/10 backdrop-blur-md rounded-xl p-3 sm:p-4 border border-white/20 hover:bg-white/20 transition-all duration-300">
+              <div className="flex items-center gap-2 mb-1">
+                <Users className="w-4 h-4 text-white/80" />
+                <span className="text-xs text-white/80">Students</span>
+              </div>
+              <p className="font-bold text-white text-lg sm:text-2xl">
+                {course.enrolledUsers?.length || 0}
+              </p>
             </div>
-            <div className="flex items-center gap-2">
-              <Calendar className="w-4 h-4" />
-              <span>Created {new Date(course.createdAt?.toDate?.() || Date.now()).toLocaleDateString()}</span>
+
+            <div className="bg-white/10 backdrop-blur-md rounded-xl p-3 sm:p-4 border border-white/20 hover:bg-white/20 transition-all duration-300">
+              <div className="flex items-center gap-2 mb-1">
+                <Video className="w-4 h-4 text-white/80" />
+                <span className="text-xs text-white/80">Meetings</span>
+              </div>
+              <p className="font-bold text-white text-lg sm:text-2xl">
+                {meetings.length}
+              </p>
+            </div>
+
+            <div className="bg-white/10 backdrop-blur-md rounded-xl p-3 sm:p-4 border border-white/20 hover:bg-white/20 transition-all duration-300">
+              <div className="flex items-center gap-2 mb-1">
+                <FileText className="w-4 h-4 text-white/80" />
+                <span className="text-xs text-white/80">Materials</span>
+              </div>
+              <p className="font-bold text-white text-lg sm:text-2xl">
+                {course.materials?.length || 0}
+              </p>
             </div>
           </div>
 
-          {!isEnrolled && !isCreator && (
-            <div className="mt-4">
+          {/* Role Badge & Enroll Button */}
+          <div className="flex flex-wrap items-center gap-3">
+            {isCreator && (
+              <div className="bg-gradient-to-r from-amber-400/20 to-yellow-400/20 backdrop-blur-md px-4 py-2 rounded-xl border border-amber-300/30 flex items-center gap-2">
+                <Award className="w-5 h-5 text-white" />
+                <span className="font-semibold text-white">Course Instructor</span>
+              </div>
+            )}
+            {!isEnrolled && !isCreator && (
               <button
                 onClick={handleEnroll}
-                className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg text-lg font-medium"
+                className="px-6 py-3 rounded-xl bg-white text-purple-600 hover:bg-purple-50 font-semibold flex items-center gap-2 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105"
               >
+                <UserPlus className="w-5 h-5" />
                 Enroll in Course
               </button>
-            </div>
-          )}
+            )}
+            {isEnrolled && !isCreator && (
+              <div className="bg-green-400/20 backdrop-blur-md px-4 py-2 rounded-xl border border-green-300/30 flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-white" />
+                <span className="font-semibold text-white">Enrolled</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="max-w-6xl mx-auto px-4 py-8">
+      <div className="w-full px-4 sm:px-6 py-6 sm:py-8" style={{width: '100%', maxWidth: 'none'}}>
         {!isEnrolled && !isCreator ? (
-          <div className="bg-white rounded-lg shadow p-8 text-center">
-            <BookOpen className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-xl font-medium text-gray-700 mb-2">Enroll to Access Course Content</h3>
-            <p className="text-gray-500 mb-6">Join this course to view materials, attend meetings, and interact with other students.</p>
+          <div className="bg-white rounded-2xl shadow-lg p-8 sm:p-12 text-center border border-purple-100 animate-fadeIn">
+            <div className="bg-gradient-to-br from-purple-100 to-pink-100 rounded-full p-6 inline-block mb-6">
+              <BookOpen className="w-16 h-16 text-purple-600" />
+            </div>
+            <h3 className="text-2xl font-bold text-gray-800 mb-3">Enroll to Access Course Content</h3>
+            <p className="text-gray-600 mb-8 max-w-md mx-auto">
+              Join this course to view materials, attend meetings, and interact with other students.
+            </p>
             <button
               onClick={handleEnroll}
-              className="bg-purple-600 hover:bg-purple-700 text-white px-8 py-3 rounded-lg text-lg font-medium"
+              className="px-8 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold flex items-center gap-2 mx-auto shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105"
             >
+              <UserPlus className="w-5 h-5" />
               Enroll Now
             </button>
           </div>
         ) : (
           <div className="space-y-6">
-            {/* Tab Navigation */}
-            <div className="bg-white rounded-lg shadow">
-              <div className="border-b border-gray-200">
-                <nav className="flex space-x-8 px-6" aria-label="Tabs">
+            {/* Tab Navigation with Modern Design */}
+            <div className="bg-white rounded-2xl shadow-lg overflow-hidden border border-gray-100">
+              <div className="border-b border-gray-200 overflow-x-auto">
+                <nav className="flex space-x-1 px-2 sm:px-4 min-w-max" aria-label="Tabs">
                   <button
                     onClick={() => setActiveTab('overview')}
-                    className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                    className={`py-4 px-4 sm:px-6 font-semibold text-sm transition-all duration-300 border-b-4 ${
                       activeTab === 'overview'
-                        ? 'border-purple-500 text-purple-600'
-                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                        ? 'border-purple-600 text-purple-600 bg-purple-50/50'
+                        : 'border-transparent text-gray-600 hover:text-purple-600 hover:bg-purple-50/30'
                     }`}
                   >
                     <div className="flex items-center space-x-2">
@@ -277,28 +283,28 @@ const CoursePage = () => {
                       <span>Overview</span>
                     </div>
                   </button>
-                  
+
                   <button
-                    onClick={() => setActiveTab('meetings')}
-                    className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                      activeTab === 'meetings'
-                        ? 'border-purple-500 text-purple-600'
-                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    onClick={() => setActiveTab('content')}
+                    className={`py-4 px-4 sm:px-6 font-semibold text-sm transition-all duration-300 border-b-4 ${
+                      activeTab === 'content'
+                        ? 'border-purple-600 text-purple-600 bg-purple-50/50'
+                        : 'border-transparent text-gray-600 hover:text-purple-600 hover:bg-purple-50/30'
                     }`}
                   >
                     <div className="flex items-center space-x-2">
                       <Video className="w-4 h-4" />
-                      <span>Meetings</span>
+                      <span>Content</span>
                     </div>
                   </button>
-                  
+
                   {(isEnrolled || isCreator) && (
                     <button
                       onClick={() => setActiveTab('progress')}
-                      className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                      className={`py-4 px-4 sm:px-6 font-semibold text-sm transition-all duration-300 border-b-4 ${
                         activeTab === 'progress'
-                          ? 'border-purple-500 text-purple-600'
-                          : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                          ? 'border-purple-600 text-purple-600 bg-purple-50/50'
+                          : 'border-transparent text-gray-600 hover:text-purple-600 hover:bg-purple-50/30'
                       }`}
                     >
                       <div className="flex items-center space-x-2">
@@ -307,99 +313,110 @@ const CoursePage = () => {
                       </div>
                     </button>
                   )}
-                  
-                  <button
-                    onClick={() => setActiveTab('materials')}
-                    className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                      activeTab === 'materials'
-                        ? 'border-purple-500 text-purple-600'
-                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2">
-                      <FileText className="w-4 h-4" />
-                      <span>Materials</span>
-                    </div>
-                  </button>
                 </nav>
               </div>
             </div>
             
             {/* Tab Content */}
             {activeTab === 'overview' && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fadeIn">
                 {/* Course Description */}
-                <div className="lg:col-span-2">
-                  <div className="bg-white rounded-lg shadow p-6">
-                    <h2 className="text-xl font-semibold text-gray-800 mb-4">About This Course</h2>
+                <div className="lg:col-span-2 space-y-6">
+                  <div className="bg-white rounded-2xl shadow-lg p-6 sm:p-8 border border-gray-100">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="bg-gradient-to-br from-purple-500 to-pink-500 p-2 rounded-xl">
+                        <BookOpen className="w-5 h-5 text-white" />
+                      </div>
+                      <h2 className="text-2xl font-bold text-gray-800">About This Course</h2>
+                    </div>
                     <p className="text-gray-600 leading-relaxed mb-6">{course.description}</p>
-                    
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-                      <div className="p-4 bg-purple-50 rounded-lg">
-                        <div className="text-2xl font-bold text-purple-600">{course.enrolledUsers?.length || 0}</div>
-                        <div className="text-sm text-gray-600">Students</div>
-                      </div>
-                      <div className="p-4 bg-blue-50 rounded-lg">
-                        <div className="text-2xl font-bold text-blue-600">{meetings.length}</div>
-                        <div className="text-sm text-gray-600">Meetings</div>
-                      </div>
-                      <div className="p-4 bg-green-50 rounded-lg">
-                        <div className="text-2xl font-bold text-green-600">{course.materials?.length || 0}</div>
-                        <div className="text-sm text-gray-600">Materials</div>
-                      </div>
-                      <div className="p-4 bg-yellow-50 rounded-lg">
-                        <div className="text-2xl font-bold text-yellow-600">
-                          {creatorProfile?.displayName ? creatorProfile.displayName.split(' ').length : 1}
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+                      <div className="p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl hover:shadow-md transition-shadow">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Users className="w-4 h-4 text-purple-600" />
                         </div>
-                        <div className="text-sm text-gray-600">Instructor</div>
+                        <div className="text-2xl sm:text-3xl font-bold text-purple-600">{course.enrolledUsers?.length || 0}</div>
+                        <div className="text-xs sm:text-sm text-gray-600 font-medium">Students</div>
+                      </div>
+                      <div className="p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl hover:shadow-md transition-shadow">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Video className="w-4 h-4 text-blue-600" />
+                        </div>
+                        <div className="text-2xl sm:text-3xl font-bold text-blue-600">{meetings.length}</div>
+                        <div className="text-xs sm:text-sm text-gray-600 font-medium">Meetings</div>
+                      </div>
+                      <div className="p-4 bg-gradient-to-br from-green-50 to-green-100 rounded-xl hover:shadow-md transition-shadow">
+                        <div className="flex items-center gap-2 mb-1">
+                          <FileText className="w-4 h-4 text-green-600" />
+                        </div>
+                        <div className="text-2xl sm:text-3xl font-bold text-green-600">{course.materials?.length || 0}</div>
+                        <div className="text-xs sm:text-sm text-gray-600 font-medium">Materials</div>
+                      </div>
+                      <div className="p-4 bg-gradient-to-br from-amber-50 to-amber-100 rounded-xl hover:shadow-md transition-shadow">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Calendar className="w-4 h-4 text-amber-600" />
+                        </div>
+                        <div className="text-xl sm:text-2xl font-bold text-amber-600">
+                          {new Date(course.createdAt?.toDate?.() || Date.now()).toLocaleDateString('en', {month: 'short'})}
+                        </div>
+                        <div className="text-xs sm:text-sm text-gray-600 font-medium">Created</div>
                       </div>
                     </div>
                   </div>
                 </div>
-                
+
                 {/* Sidebar */}
                 <div className="space-y-6">
                   {/* Course Info */}
-                  <div className="bg-white rounded-lg shadow p-6">
-                    <h3 className="text-lg font-semibold text-gray-800 mb-4">Course Information</h3>
-                    <div className="space-y-3">
-                      <div>
-                        <span className="text-sm text-gray-600">Instructor:</span>
-                        <p className="font-medium">{creatorProfile?.displayName || 'Unknown'}</p>
+                  <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="bg-gradient-to-br from-purple-500 to-pink-500 p-2 rounded-xl">
+                        <GraduationCap className="w-5 h-5 text-white" />
                       </div>
-                      <div>
-                        <span className="text-sm text-gray-600">Students:</span>
-                        <p className="font-medium">{course.enrolledUsers?.length || 0} enrolled</p>
+                      <h3 className="text-lg font-bold text-gray-800">Course Info</h3>
+                    </div>
+                    <div className="space-y-4">
+                      <div className="p-3 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl">
+                        <span className="text-xs text-gray-600 font-medium block mb-1">Instructor</span>
+                        <p className="font-bold text-gray-800">{creatorProfile?.displayName || 'Unknown'}</p>
                       </div>
-                      <div>
-                        <span className="text-sm text-gray-600">Materials:</span>
-                        <p className="font-medium">{course.materials?.length || 0} resources</p>
+                      <div className="p-3 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl">
+                        <span className="text-xs text-gray-600 font-medium block mb-1">Enrolled Students</span>
+                        <p className="font-bold text-gray-800">{course.enrolledUsers?.length || 0} students</p>
                       </div>
-                      <div>
-                        <span className="text-sm text-gray-600">Meetings:</span>
-                        <p className="font-medium">{meetings.length} scheduled</p>
+                      <div className="p-3 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl">
+                        <span className="text-xs text-gray-600 font-medium block mb-1">Course Materials</span>
+                        <p className="font-bold text-gray-800">{course.materials?.length || 0} resources</p>
+                      </div>
+                      <div className="p-3 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl">
+                        <span className="text-xs text-gray-600 font-medium block mb-1">Scheduled Meetings</span>
+                        <p className="font-bold text-gray-800">{meetings.length} meetings</p>
                       </div>
                     </div>
                   </div>
-                  
+
                   {/* Quick Actions */}
                   {isCreator && (
-                    <div className="bg-white rounded-lg shadow p-6">
-                      <h3 className="text-lg font-semibold text-gray-800 mb-4">Quick Actions</h3>
+                    <div className="bg-gradient-to-br from-purple-500 to-pink-500 rounded-2xl shadow-lg p-6 text-white">
+                      <div className="flex items-center gap-3 mb-4">
+                        <Sparkles className="w-5 h-5" />
+                        <h3 className="text-lg font-bold">Quick Actions</h3>
+                      </div>
                       <div className="space-y-2">
                         <button
-                          onClick={() => setActiveTab('meetings')}
-                          className="w-full text-left px-4 py-2 rounded-lg hover:bg-gray-50 flex items-center gap-2"
+                          onClick={() => setActiveTab('content')}
+                          className="w-full text-left px-4 py-3 rounded-xl bg-white/20 backdrop-blur-sm hover:bg-white/30 flex items-center gap-3 transition-all duration-300 hover:scale-105"
                         >
-                          <Video className="w-4 h-4 text-purple-600" />
-                          Manage Meetings
+                          <Video className="w-5 h-5" />
+                          <span className="font-medium">Manage Content</span>
                         </button>
                         <button
-                          onClick={() => setActiveTab('materials')}
-                          className="w-full text-left px-4 py-2 rounded-lg hover:bg-gray-50 flex items-center gap-2"
+                          onClick={() => setActiveTab('progress')}
+                          className="w-full text-left px-4 py-3 rounded-xl bg-white/20 backdrop-blur-sm hover:bg-white/30 flex items-center gap-3 transition-all duration-300 hover:scale-105"
                         >
-                          <FileText className="w-4 h-4 text-purple-600" />
-                          Manage Materials
+                          <BarChart3 className="w-5 h-5" />
+                          <span className="font-medium">View Progress</span>
                         </button>
                       </div>
                     </div>
@@ -408,208 +425,28 @@ const CoursePage = () => {
               </div>
             )}
             
-            {activeTab === 'meetings' && (
-              <CourseMeetingScheduler
-                courseId={courseId}
-                courseTitle={course.title}
-                enrolledEmails={course.enrolledUsers || []} // Pass user IDs for now
-                isHost={isCreator}
-                onMeetingScheduled={loadCourseData}
-              />
+            {activeTab === 'content' && (
+              <div className="animate-fadeIn">
+                <CourseContentHub
+                  courseId={courseId}
+                  courseTitle={course.title}
+                  isInstructor={isCreator}
+                  enrolledEmails={course.enrolledUsers || []}
+                  isHost={isCreator}
+                />
+              </div>
             )}
-            
+
             {activeTab === 'progress' && (isEnrolled || isCreator) && (
               <CourseProgressDashboard
                 courseId={courseId}
                 courseTitle={course.title}
               />
             )}
-            
-            {activeTab === 'materials' && (
-              <div className="bg-white rounded-lg shadow p-6">
-                <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-2xl font-semibold text-gray-800 flex items-center gap-2">
-                    <FileText className="w-6 h-6" />
-                    Course Materials
-                  </h2>
-                  {isCreator && (
-                    <button
-                      onClick={() => setShowAddMaterial(true)}
-                      className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg flex items-center gap-2"
-                    >
-                      <Plus className="w-4 h-4" />
-                      Add Material
-                    </button>
-                  )}
-                </div>
-
-                {course.materials && course.materials.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {course.materials.map((material, index) => (
-                      <div key={index} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                        <div className="flex items-start justify-between">
-                          <div className="flex items-start gap-3 flex-1">
-                            <FileText className="w-5 h-5 text-purple-600 mt-1" />
-                            <div className="flex-1">
-                              <span className="text-gray-800 font-medium block">{material}</span>
-                              <div className="mt-2 flex items-center gap-2">
-                                {material.startsWith('http') && (
-                                  <a
-                                    href={material}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-purple-600 hover:text-purple-700 flex items-center gap-1 text-sm"
-                                  >
-                                    <ExternalLink className="w-4 h-4" />
-                                    Open
-                                  </a>
-                                )}
-                                {isCreator && (
-                                  <button
-                                    onClick={() => handleRemoveMaterial(material)}
-                                    className="text-red-600 hover:text-red-700 text-sm"
-                                  >
-                                    Remove
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-12 text-gray-500">
-                    <FileText className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-gray-700 mb-2">No materials added yet</h3>
-                    <p className="text-gray-500 mb-6">Course materials will appear here once the instructor adds them.</p>
-                    {isCreator && (
-                      <button
-                        onClick={() => setShowAddMaterial(true)}
-                        className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg"
-                      >
-                        Add First Material
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         )}
       </div>
 
-      {/* Create Meeting Modal */}
-      {showCreateMeeting && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-md">
-            <div className="p-6 border-b">
-              <h2 className="text-xl font-semibold text-gray-800">Schedule Meeting</h2>
-            </div>
-
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Meeting Title *
-                </label>
-                <input
-                  type="text"
-                  value={newMeeting.title}
-                  onChange={(e) => setNewMeeting(prev => ({ ...prev, title: e.target.value }))}
-                  placeholder="Enter meeting title..."
-                  className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-purple-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Description
-                </label>
-                <textarea
-                  value={newMeeting.description}
-                  onChange={(e) => setNewMeeting(prev => ({ ...prev, description: e.target.value }))}
-                  placeholder="Meeting description..."
-                  className="w-full px-4 py-2 border rounded-lg resize-none focus:outline-none focus:border-purple-500"
-                  rows="3"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Scheduled Time *
-                </label>
-                <input
-                  type="datetime-local"
-                  value={newMeeting.scheduledTime}
-                  onChange={(e) => setNewMeeting(prev => ({ ...prev, scheduledTime: e.target.value }))}
-                  className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-purple-500"
-                />
-              </div>
-            </div>
-
-            <div className="p-6 border-t flex justify-end gap-3">
-              <button
-                onClick={() => {
-                  setShowCreateMeeting(false);
-                  setNewMeeting({ title: '', description: '', scheduledTime: '' });
-                }}
-                className="px-6 py-2 text-gray-600 hover:text-gray-800"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateMeeting}
-                className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg"
-              >
-                Schedule Meeting
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add Material Modal */}
-      {showAddMaterial && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-md">
-            <div className="p-6 border-b">
-              <h2 className="text-xl font-semibold text-gray-800">Add Course Material</h2>
-            </div>
-
-            <div className="p-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Material URL or Description
-              </label>
-              <input
-                type="text"
-                value={newMaterial}
-                onChange={(e) => setNewMaterial(e.target.value)}
-                placeholder="Enter material URL or description..."
-                className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-purple-500"
-              />
-            </div>
-
-            <div className="p-6 border-t flex justify-end gap-3">
-              <button
-                onClick={() => {
-                  setShowAddMaterial(false);
-                  setNewMaterial('');
-                }}
-                className="px-6 py-2 text-gray-600 hover:text-gray-800"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleAddMaterial}
-                className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg"
-              >
-                Add Material
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

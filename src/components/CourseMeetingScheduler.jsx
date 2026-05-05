@@ -127,22 +127,28 @@ const CourseMeetingScheduler = ({ courseId, courseTitle, enrolledEmails = [], is
 
   const uploadMaterial = async (meetingId, file, title) => {
     try {
-      const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage');
-      const { storage } = await import('../firebase');
       const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
       const { db } = await import('../firebase');
 
-      const filePath = `meetingMaterials/${meetingId}/${Date.now()}-${file.name}`;
-      const fileRef = ref(storage, filePath);
-      await uploadBytes(fileRef, file);
-      const fileUrl = await getDownloadURL(fileRef);
+      // Check file size (max 500KB)
+      if (file.size > 500000) {
+        alert('File too large. Please select a file smaller than 500KB.');
+        return;
+      }
+
+      // Convert file to base64
+      const fileUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
 
       await addDoc(collection(db, 'meetingMaterials'), {
         meetingId,
         title: title || file.name,
         fileName: file.name,
         fileUrl,
-        filePath,
         uploaderId: currentUser.uid,
         uploaderName: currentUser.displayName || currentUser.email,
         createdAt: serverTimestamp()

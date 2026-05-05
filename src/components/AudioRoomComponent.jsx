@@ -2,10 +2,25 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Peer from 'peerjs';
 import io from 'socket.io-client';
+import {
+  Mic, MicOff, Phone, Users, MessageSquare, Settings, Crown,
+  Upload, Image as ImageIcon, Send, X, FileText, Volume2,
+  AlertCircle, Check, Loader, ChevronDown, ChevronUp, Paperclip,
+  Lock, Unlock, LogOut, XCircle
+} from 'lucide-react';
 
-const socket = io.connect('http://localhost:3001'); // Server running on port 3001
+const socket = io.connect('http://localhost:3001', {
+  reconnection: true,
+  reconnectionAttempts: 3,
+  reconnectionDelay: 1000,
+  timeout: 5000
+});
 
-const AudioRoomComponent = ({ roomId, userId, userName, isHost }) => {
+socket.on('connect_error', (error) => {
+  console.warn('Socket connection error:', error.message);
+});
+
+const AudioRoomComponent = ({ roomId, userId, userName, userEmail, isHost }) => {
   const [participants, setParticipants] = useState([]);
   const [chatMessages, setChatMessages] = useState([]);
   const [message, setMessage] = useState('');
@@ -16,93 +31,98 @@ const AudioRoomComponent = ({ roomId, userId, userName, isHost }) => {
   const [isUploadingMedia, setIsUploadingMedia] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [showMediaPanel, setShowMediaPanel] = useState(false);
+  const [showHostControls, setShowHostControls] = useState(true);
+  const [showNotification, setShowNotification] = useState(null);
+  const [isRoomLocked, setIsRoomLocked] = useState(false);
+
   const audioRef = useRef();
   const localStreamRef = useRef();
   const peerRef = useRef();
+  const chatEndRef = useRef();
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Auto-scroll chat to bottom
   useEffect(() => {
-    // Handle browser back button navigation
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
+
+  // Show notification helper
+  const notify = (message, type = 'info') => {
+    setShowNotification({ message, type });
+    setTimeout(() => setShowNotification(null), 3000);
+  };
+
+  useEffect(() => {
     const handlePopState = (event) => {
-      // When back button is pressed in audio room
       if (location.pathname.includes('/audio-room/')) {
-        // Prevent default back navigation
         event.preventDefault();
-        
-        // Clean up and navigate to audio rooms list
         handleLeaveRoom();
       }
     };
 
-    // Replace current history state to prevent back navigation issues
     window.history.replaceState({ audioRoom: true }, '', window.location.href);
-    
-    // Add popstate listener
     window.addEventListener('popstate', handlePopState);
 
-    // Cleanup function to stop local tracks
     const cleanup = () => {
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => track.stop());
       }
     };
 
-    // Initialize a peer
+    // Initialize peer
     peerRef.current = new Peer(userId);
 
-    // When a peer connection is open
     peerRef.current.on('open', (id) => {
       console.log('Peer connection open:', id);
       setIsConnected(true);
+      notify('Connected to room', 'success');
     });
 
     // Get local media stream
-    navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
-      localStreamRef.current = stream;
-      // Don't play local stream to avoid echo/feedback
-    }).catch((error) => {
-      console.error('Error accessing microphone:', error);
-    });
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then((stream) => {
+        localStreamRef.current = stream;
+      })
+      .catch((error) => {
+        console.error('Error accessing microphone:', error);
+        notify('Microphone access denied', 'error');
+      });
 
     // Handle incoming call
     peerRef.current.on('call', (call) => {
       call.answer(localStreamRef.current);
       call.on('stream', (remoteStream) => {
-        // Only play remote stream
         if (audioRef.current) {
           audioRef.current.srcObject = remoteStream;
         }
       });
     });
 
-    // Handle socket events with updated event names from server
+    // Socket events
     socket.on('participants-updated', (participantsList) => {
       setParticipants(participantsList);
     });
 
-    socket.on('new-message', (msg) => {
-      console.log('Received new message:', msg);
-      console.log('Message type:', msg.messageType);
-      console.log('Has media data:', !!msg.mediaData);
-      console.log('Has media URL:', !!msg.mediaUrl);
-      console.log('MIME type:', msg.mimeType);
-      
-      if (msg.messageType === 'media' && msg.mediaData) {
-        console.log('Media data length:', msg.mediaData.length);
-        console.log('Media data preview:', msg.mediaData.substring(0, 100) + '...');
-        console.log('Media data starts with data:URL:', msg.mediaData.startsWith('data:'));
+    socket.on('participant-joined', (participant) => {
+      notify(`${participant.userName} joined`, 'info');
+    });
+
+    socket.on('participant-left', ({ userId: leftUserId }) => {
+      const leftParticipant = participants.find(p => p.userId === leftUserId);
+      if (leftParticipant) {
+        notify(`${leftParticipant.userName} left`, 'info');
       }
-      
+    });
+
+    socket.on('new-message', (msg) => {
       setChatMessages((prev) => [...prev, msg]);
     });
 
     socket.on('chat-history', (messages) => {
-      console.log('Received chat history:', messages);
       setChatMessages(messages);
     });
 
-    // Listen for room settings updates
     socket.on('room-settings-updated', (settings) => {
       setRoomSettings(settings);
     });
@@ -111,62 +131,72 @@ const AudioRoomComponent = ({ roomId, userId, userName, isHost }) => {
       setRoomSettings(prev => ({ ...prev, allow_media }));
     });
 
-    // Notify server that the user joined the room
-    console.log('Joining room:', { roomId, userId, userName, isHost });
-    socket.emit('join-room', { roomId, userId, userName, isHost });
-    
-    // Listen for message errors
-    socket.on('message-error', (error) => {
-      console.error('Message error:', error);
-      alert('Chat error: ' + error);
+    socket.on('room-lock-status', ({ lock }) => {
+      setIsRoomLocked(lock);
+      notify(lock ? 'Room locked by host' : 'Room unlocked by host', 'info');
     });
+
+    socket.on('room-closed', () => {
+      notify('Room has been closed by host', 'error');
+      setTimeout(() => handleLeaveRoom(), 2000);
+    });
+
+    socket.on('kicked-from-room', () => {
+      notify('You have been removed from the room', 'error');
+      setTimeout(() => handleLeaveRoom(), 2000);
+    });
+
+    socket.on('message-error', (error) => {
+      notify(error, 'error');
+    });
+
+    console.log('Joining room:', { roomId, userId, userName, userEmail, isHost });
+    socket.emit('join-room', { roomId, userId, userName, userEmail, isHost });
 
     return () => {
       window.removeEventListener('popstate', handlePopState);
       socket.emit('leave-room', { roomId, userId });
       socket.off('participants-updated');
+      socket.off('participant-joined');
+      socket.off('participant-left');
       socket.off('new-message');
       socket.off('chat-history');
       socket.off('room-settings-updated');
       socket.off('room-media-settings-updated');
+      socket.off('room-lock-status');
+      socket.off('room-closed');
+      socket.off('kicked-from-room');
+      socket.off('message-error');
       cleanup();
       if (peerRef.current) {
         peerRef.current.destroy();
         peerRef.current = null;
       }
     };
-  }, [roomId, userId, userName, isHost, location.pathname]);
+  }, [roomId, userId, userName, userEmail, isHost, location.pathname]);
 
   const handleLeaveRoom = () => {
     socket.emit('leave-room', { roomId, userId });
-    
-    // Stop all media tracks (microphone, camera, etc.)
+
     if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => {
-        console.log('Stopping track:', track.kind);
-        track.stop();
-      });
+      localStreamRef.current.getTracks().forEach(track => track.stop());
       localStreamRef.current = null;
     }
-    
-    // Clear audio element
+
     if (audioRef.current) {
       audioRef.current.srcObject = null;
     }
-    
-    // Disconnect peer connection
+
     if (peerRef.current) {
       peerRef.current.destroy();
       peerRef.current = null;
     }
-    
-    // Clear state
+
     setParticipants([]);
     setChatMessages([]);
     setIsConnected(false);
     setIsMuted(false);
-    
-    // Navigate back to audio rooms list, replacing current history entry
+
     navigate('/audio-rooms', { replace: true });
   };
 
@@ -175,23 +205,23 @@ const AudioRoomComponent = ({ roomId, userId, userName, isHost }) => {
       localStreamRef.current.getAudioTracks().forEach(track => {
         track.enabled = !track.enabled;
       });
-      setIsMuted(!isMuted);
-      socket.emit('toggle-mute', { roomId, userId, isMuted: !isMuted });
+      const newMuted = !isMuted;
+      setIsMuted(newMuted);
+      socket.emit('toggle-mute', { roomId, userId, isMuted: newMuted });
+      notify(newMuted ? 'Microphone muted' : 'Microphone unmuted', 'info');
     }
   };
 
   const handleSendMessage = () => {
     if (message.trim()) {
-      console.log('Sending message:', { roomId, userId, userName, message: message.trim() });
       socket.emit('send-message', { roomId, userId, userName, message: message.trim() });
       setMessage('');
-    } else {
-      console.log('Message is empty, not sending');
     }
   };
 
   const handleKeyPress = (e) => {
-    if (e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
       handleSendMessage();
     }
   };
@@ -199,617 +229,559 @@ const AudioRoomComponent = ({ roomId, userId, userName, isHost }) => {
   const handleToggleMediaPermissions = () => {
     if (isHost) {
       const newValue = !roomSettings.allow_media;
-      socket.emit('host-set-media-permissions', { 
-        roomId, 
-        hostId: userId, 
-        allow_media: newValue 
+      socket.emit('host-set-media-permissions', {
+        roomId,
+        hostId: userId,
+        allow_media: newValue
       });
+      notify(`Media sharing ${newValue ? 'enabled' : 'disabled'}`, 'success');
+    }
+  };
+
+  const handleToggleChatPermissions = () => {
+    if (isHost) {
+      const newValue = !roomSettings.allow_chat;
+      setRoomSettings(prev => ({ ...prev, allow_chat: newValue }));
+      notify(`Chat ${newValue ? 'enabled' : 'disabled'}`, 'success');
+    }
+  };
+
+  const handleToggleRoomLock = () => {
+    if (isHost) {
+      const newLock = !isRoomLocked;
+      socket.emit('host-lock-room', {
+        roomId,
+        hostId: userId,
+        lock: newLock
+      });
+      setIsRoomLocked(newLock);
+      notify(newLock ? 'Room locked' : 'Room unlocked', 'success');
+    }
+  };
+
+  const handleEndRoom = () => {
+    if (isHost) {
+      if (confirm('Are you sure you want to end this room for everyone?')) {
+        socket.emit('end-room', { roomId });
+        notify('Ending room for all participants...', 'info');
+        setTimeout(() => handleLeaveRoom(), 1000);
+      }
     }
   };
 
   const handleMediaFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
+      const maxSize = 5 * 1024 * 1024;
+      if (file.size > maxSize) {
+        notify('File too large. Maximum size is 5MB', 'error');
+        return;
+      }
       setMediaFile(file);
     }
   };
 
   const handleSendMedia = async () => {
-    if (mediaFile && roomSettings.allow_media) {
-      setIsUploadingMedia(true);
-      setUploadProgress(0);
-      
-      try {
-        // Check file size (limit to 5MB for base64 encoding)
-        const maxSize = 5 * 1024 * 1024; // 5MB
-        const isLargeFile = mediaFile.size > maxSize;
-        
-        if (isLargeFile) {
-          alert('File is too large. Please use files smaller than 5MB for direct sharing.');
-          return;
-        }
-        
-                 // Convert file to base64
-         const reader = new FileReader();
-         
-         const fileDataPromise = new Promise((resolve, reject) => {
-           reader.onload = () => {
-             const base64Data = reader.result;
-             resolve(base64Data);
-           };
-           reader.onerror = () => reject(new Error('Failed to read file'));
-         });
-         
-         // Start reading the file
-         reader.readAsDataURL(mediaFile);
-         
-         // Simulate progress for small files
-         const progressInterval = setInterval(() => {
-           setUploadProgress(prev => {
-             if (prev >= 90) {
-               clearInterval(progressInterval);
-               return 90;
-             }
-             return prev + 10;
-           });
-         }, 100);
-         
-         const base64Data = await fileDataPromise;
-         clearInterval(progressInterval);
-         setUploadProgress(100);
-        
-                 // Send message with file data
-         const messageData = {
-           roomId,
-           userId,
-           userName,
-           message: `Shared: ${mediaFile.name}`,
-           messageType: 'media',
-           mediaData: base64Data,
-           fileName: mediaFile.name,
-           fileSize: mediaFile.size,
-           mimeType: mediaFile.type
-         };
-         
-         console.log('Sending media message:', {
-           messageType: messageData.messageType,
-           hasMediaData: !!messageData.mediaData,
-           fileName: messageData.fileName,
-           mimeType: messageData.mimeType,
-           dataLength: messageData.mediaData ? messageData.mediaData.length : 0,
-           dataPreview: messageData.mediaData ? messageData.mediaData.substring(0, 100) + '...' : 'No data'
-         });
-         
-         // Check if data is too large for Socket.IO
-         if (base64Data.length > 1000000) { // 1MB limit for Socket.IO
-           console.warn('Media data is very large, may cause issues');
-         }
-         
-         socket.emit('send-message', messageData);
-        
-        setMediaFile(null);
-        setShowMediaPanel(false);
-        
-        // Clear the file input
-        const fileInput = document.getElementById('media-file-input');
-        if (fileInput) {
-          fileInput.value = '';
-        }
-        
-        // Reset progress
-        setTimeout(() => setUploadProgress(0), 1000);
-      } catch (error) {
-        console.error('Media sharing error:', error);
-        alert(`Failed to share media: ${error.message}`);
-      } finally {
-        setIsUploadingMedia(false);
-      }
+    if (!mediaFile || !roomSettings.allow_media) return;
+
+    setIsUploadingMedia(true);
+    setUploadProgress(0);
+
+    try {
+      const reader = new FileReader();
+
+      const fileDataPromise = new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Failed to read file'));
+      });
+
+      reader.readAsDataURL(mediaFile);
+
+      const progressInterval = setInterval(() => {
+        setUploadProgress(prev => {
+          if (prev >= 90) {
+            clearInterval(progressInterval);
+            return 90;
+          }
+          return prev + 10;
+        });
+      }, 100);
+
+      const base64Data = await fileDataPromise;
+      clearInterval(progressInterval);
+      setUploadProgress(100);
+
+      const messageData = {
+        roomId,
+        userId,
+        userName,
+        message: `Shared: ${mediaFile.name}`,
+        messageType: 'media',
+        mediaData: base64Data,
+        fileName: mediaFile.name,
+        fileSize: mediaFile.size,
+        mimeType: mediaFile.type
+      };
+
+      socket.emit('send-message', messageData);
+
+      setMediaFile(null);
+      setShowMediaPanel(false);
+      notify('Media shared successfully', 'success');
+
+      setTimeout(() => setUploadProgress(0), 1000);
+    } catch (error) {
+      console.error('Media sharing error:', error);
+      notify(`Failed to share media: ${error.message}`, 'error');
+    } finally {
+      setIsUploadingMedia(false);
     }
   };
 
+  const getAvatarColor = (name) => {
+    const colors = [
+      'bg-gradient-to-br from-purple-500 to-pink-500',
+      'bg-gradient-to-br from-blue-500 to-cyan-500',
+      'bg-gradient-to-br from-green-500 to-emerald-500',
+      'bg-gradient-to-br from-orange-500 to-red-500',
+      'bg-gradient-to-br from-indigo-500 to-purple-500',
+      'bg-gradient-to-br from-pink-500 to-rose-500'
+    ];
+    const index = (name?.charCodeAt(0) || 0) % colors.length;
+    return colors[index];
+  };
+
+  const formatFileSize = (bytes) => {
+    return (bytes / 1024 / 1024).toFixed(2);
+  };
+
+  const getFileIcon = (mimeType) => {
+    if (mimeType?.startsWith('image/')) return <ImageIcon className="w-5 h-5" />;
+    if (mimeType?.startsWith('audio/')) return <Volume2 className="w-5 h-5" />;
+    if (mimeType?.startsWith('video/')) return <FileText className="w-5 h-5" />;
+    return <Paperclip className="w-5 h-5" />;
+  };
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-100 to-purple-200 p-6">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="bg-white bg-opacity-80 backdrop-blur-lg rounded-2xl shadow-xl p-6 mb-6">
-          <div className="flex justify-between items-center">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-800 mb-2">🎤 Audio Room</h1>
-              <p className="text-gray-600">Room ID: {roomId}</p>
-              <div className="flex items-center mt-2">
-                <div className={`w-3 h-3 rounded-full mr-2 ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                <span className="text-sm text-gray-600">
-                  {isConnected ? 'Connected' : 'Connecting...'}
-                </span>
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-100" style={{width: '100%', maxWidth: 'none'}}>
+      {/* Top Navigation Bar */}
+      <div className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
+        <div className="w-full px-4 sm:px-6 lg:px-8" style={{width: '100%', maxWidth: 'none'}}>
+          <div className="flex items-center justify-between h-16">
+            {/* Left: Room Info */}
+            <div className="flex items-center space-x-4">
+              <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-blue-600 rounded-lg flex items-center justify-center shadow-lg">
+                <Users className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-lg font-bold text-gray-800">Audio Room</h1>
+                <div className="flex items-center space-x-2">
+                  <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+                  <span className="text-xs text-gray-600">
+                    {isConnected ? 'Connected' : 'Connecting...'}
+                  </span>
+                  <span className="text-xs text-gray-400">•</span>
+                  <span className="text-xs text-gray-600">{participants.length} {participants.length === 1 ? 'participant' : 'participants'}</span>
+                </div>
               </div>
             </div>
-            <div className="flex gap-3">
+
+            {/* Right: Controls */}
+            <div className="flex items-center space-x-3">
               <button
                 onClick={handleToggleMute}
-                className={`px-4 py-2 rounded-lg font-semibold transition-colors duration-200 ${
-                  isMuted 
-                    ? 'bg-red-500 hover:bg-red-600 text-white' 
+                className={`flex items-center space-x-2 px-4 py-2 rounded-lg font-semibold shadow-md transition-all duration-200 ${
+                  isMuted
+                    ? 'bg-red-500 hover:bg-red-600 text-white'
                     : 'bg-green-500 hover:bg-green-600 text-white'
                 }`}
               >
-                {isMuted ? '🔇 Unmute' : '🎤 Mute'}
+                {isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                <span className="hidden sm:inline">{isMuted ? 'Unmute' : 'Mute'}</span>
               </button>
-              <button
-                onClick={handleLeaveRoom}
-                className="bg-red-500 hover:bg-red-600 text-white font-semibold px-6 py-2 rounded-lg shadow-md transition-colors duration-200"
-              >
-                Leave Room
-              </button>
+
+              {isHost ? (
+                <>
+                  <button
+                    onClick={handleLeaveRoom}
+                    className="flex items-center space-x-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span className="hidden sm:inline">Leave</span>
+                  </button>
+                  <button
+                    onClick={handleEndRoom}
+                    className="flex items-center space-x-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+                  >
+                    <XCircle className="w-4 h-4" />
+                    <span className="hidden sm:inline">End Room</span>
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={handleLeaveRoom}
+                  className="flex items-center space-x-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+                >
+                  <Phone className="w-4 h-4 transform rotate-135" />
+                  <span className="hidden sm:inline">Leave</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Host Controls */}
-        {isHost && (
-          <div className="bg-white bg-opacity-80 backdrop-blur-lg rounded-2xl shadow-xl p-6 mb-6">
-            <h3 className="text-xl font-bold text-gray-800 mb-4">🔧 Host Controls</h3>
-            <div className="flex gap-4">
-              <button
-                onClick={handleToggleMediaPermissions}
-                className={`px-4 py-2 rounded-lg font-semibold transition-colors duration-200 ${
-                  roomSettings.allow_media
-                    ? 'bg-green-500 hover:bg-green-600 text-white'
-                    : 'bg-gray-500 hover:bg-gray-600 text-white'
-                }`}
-              >
-                {roomSettings.allow_media ? '📁 Media Enabled' : '🚫 Media Disabled'}
-              </button>
-            </div>
+      {/* Notification Toast */}
+      {showNotification && (
+        <div className="fixed top-20 right-4 z-50 animate-slideDown">
+          <div className={`px-4 py-3 rounded-lg shadow-xl flex items-center space-x-3 ${
+            showNotification.type === 'success' ? 'bg-green-500' :
+            showNotification.type === 'error' ? 'bg-red-500' :
+            'bg-blue-500'
+          } text-white`}>
+            {showNotification.type === 'success' && <Check className="w-5 h-5" />}
+            {showNotification.type === 'error' && <AlertCircle className="w-5 h-5" />}
+            {showNotification.type === 'info' && <AlertCircle className="w-5 h-5" />}
+            <span className="font-medium">{showNotification.message}</span>
           </div>
-        )}
+        </div>
+      )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Participants Panel */}
+      {/* Main Content */}
+      <div className="w-full px-4 sm:px-6 lg:px-8 py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Left Sidebar: Participants */}
           <div className="lg:col-span-1">
-            <div className="bg-white bg-opacity-80 backdrop-blur-lg rounded-2xl shadow-xl p-6">
-              <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
-                👥 Participants ({participants.length})
-              </h3>
-              <div className="space-y-3">
+            <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+              <div className="bg-gradient-to-r from-purple-600 to-blue-600 px-4 py-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-white font-bold flex items-center">
+                    <Users className="w-4 h-4 mr-2" />
+                    Participants
+                  </h2>
+                  <span className="bg-white bg-opacity-30 px-3 py-1 rounded-full text-white text-sm font-bold shadow-md">
+                    {participants.length}
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-4 space-y-3 max-h-[calc(100vh-300px)] overflow-y-auto">
                 {participants.length === 0 ? (
-                  <p className="text-gray-500 text-center py-4">No participants yet...</p>
+                  <div className="text-center py-8">
+                    <Users className="w-12 h-12 text-gray-300 mx-auto mb-2" />
+                    <p className="text-gray-500 text-sm">No participants yet</p>
+                  </div>
                 ) : (
-                  participants.map((participant) => (
-                    <div key={participant.userId} className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
-                      <div className="flex items-center">
-                        <div className="w-8 h-8 bg-purple-500 rounded-full flex items-center justify-center text-white font-semibold text-sm mr-3">
-                          {participant.userName?.charAt(0)?.toUpperCase() || 'U'}
-                        </div>
-                        <div>
-                          <p className="font-medium text-gray-800">{participant.userName}</p>
-                          {participant.isHost && (
-                            <p className="text-xs text-purple-600 font-medium">Host</p>
-                          )}
+                  participants.map((participant, index) => {
+                    const isCurrentUser = participant.userId === userId;
+                    const showAsHost = participant.isHost || (isCurrentUser && isHost);
+
+                    return (
+                      <div
+                        key={participant.userId}
+                        className={`bg-gradient-to-r from-gray-50 to-white p-3 rounded-xl border transition-all duration-200 animate-scaleIn ${
+                          isCurrentUser ? 'border-purple-400 ring-2 ring-purple-200' : 'border-gray-100 hover:border-purple-300'
+                        }`}
+                        style={{ animationDelay: `${index * 50}ms` }}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-3">
+                            <div className={`w-10 h-10 ${getAvatarColor(participant.userName)} rounded-full flex items-center justify-center shadow-md`}>
+                              <span className="text-white font-bold text-sm">
+                                {participant.userName?.charAt(0)?.toUpperCase() || 'U'}
+                              </span>
+                            </div>
+                            <div>
+                              <p className="font-semibold text-gray-800 text-sm flex items-center">
+                                {participant.userName}
+                                {isCurrentUser && <span className="ml-1 text-purple-600">(You)</span>}
+                                {showAsHost && (
+                                  <Crown className="w-3 h-3 text-yellow-500 ml-1" />
+                                )}
+                              </p>
+                              {showAsHost && (
+                                <p className="text-xs text-purple-600 font-medium">Host</p>
+                              )}
+                            </div>
+                          </div>
+                          <div>
+                            {participant.isMuted ? (
+                              <MicOff className="w-4 h-4 text-red-500" />
+                            ) : (
+                              <Mic className="w-4 h-4 text-green-500" />
+                            )}
+                          </div>
                         </div>
                       </div>
-                      <div className="flex items-center">
-                        {participant.isMuted && (
-                          <span className="text-red-500 text-sm">🔇</span>
-                        )}
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
+
+            {/* Host Controls */}
+            {isHost && (
+              <div className="bg-white rounded-2xl shadow-xl overflow-hidden mt-6">
+                <button
+                  onClick={() => setShowHostControls(!showHostControls)}
+                  className="w-full bg-gradient-to-r from-yellow-500 to-orange-500 px-4 py-3 flex items-center justify-between text-white font-bold"
+                >
+                  <div className="flex items-center">
+                    <Settings className="w-4 h-4 mr-2" />
+                    Host Controls
+                  </div>
+                  {showHostControls ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+
+                {showHostControls && (
+                  <div className="p-4 space-y-3">
+                    <button
+                      onClick={handleToggleMediaPermissions}
+                      className={`w-full flex items-center justify-between px-4 py-3 rounded-lg font-semibold shadow-md transition-all duration-200 ${
+                        roomSettings.allow_media
+                          ? 'bg-green-500 hover:bg-green-600 text-white'
+                          : 'bg-gray-500 hover:bg-gray-600 text-white'
+                      }`}
+                    >
+                      <div className="flex items-center">
+                        <ImageIcon className="w-4 h-4 mr-2" />
+                        Media Sharing
+                      </div>
+                      <span className="text-xs">
+                        {roomSettings.allow_media ? 'Enabled' : 'Disabled'}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={handleToggleChatPermissions}
+                      className={`w-full flex items-center justify-between px-4 py-3 rounded-lg font-semibold shadow-md transition-all duration-200 ${
+                        roomSettings.allow_chat
+                          ? 'bg-green-500 hover:bg-green-600 text-white'
+                          : 'bg-gray-500 hover:bg-gray-600 text-white'
+                      }`}
+                    >
+                      <div className="flex items-center">
+                        <MessageSquare className="w-4 h-4 mr-2" />
+                        Chat
+                      </div>
+                      <span className="text-xs">
+                        {roomSettings.allow_chat ? 'Enabled' : 'Disabled'}
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={handleToggleRoomLock}
+                      className={`w-full flex items-center justify-between px-4 py-3 rounded-lg font-semibold shadow-md transition-all duration-200 ${
+                        isRoomLocked
+                          ? 'bg-red-500 hover:bg-red-600 text-white'
+                          : 'bg-blue-500 hover:bg-blue-600 text-white'
+                      }`}
+                    >
+                      <div className="flex items-center">
+                        {isRoomLocked ? <Lock className="w-4 h-4 mr-2" /> : <Unlock className="w-4 h-4 mr-2" />}
+                        Room Lock
+                      </div>
+                      <span className="text-xs">
+                        {isRoomLocked ? 'Locked' : 'Unlocked'}
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* Chat Panel */}
-          <div className="lg:col-span-2">
-            <div className="bg-white bg-opacity-80 backdrop-blur-lg rounded-2xl shadow-xl p-6 h-96 flex flex-col">
-              <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
-                💬 Chat
-              </h3>
-              
+          {/* Right: Chat */}
+          <div className="lg:col-span-3">
+            <div className="bg-white rounded-2xl shadow-xl overflow-hidden h-[calc(100vh-200px)] flex flex-col">
+              {/* Chat Header */}
+              <div className="bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-4">
+                <h2 className="text-white font-bold flex items-center">
+                  <MessageSquare className="w-5 h-5 mr-2" />
+                  Chat
+                </h2>
+              </div>
+
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto bg-gray-50 rounded-lg p-4 mb-4 space-y-3">
+              <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50">
                 {chatMessages.length === 0 ? (
-                  <p className="text-gray-500 text-center">No messages yet. Start the conversation!</p>
+                  <div className="flex flex-col items-center justify-center h-full">
+                    <MessageSquare className="w-16 h-16 text-gray-300 mb-4" />
+                    <p className="text-gray-500 text-lg font-medium">No messages yet</p>
+                    <p className="text-gray-400 text-sm">Start the conversation!</p>
+                  </div>
                 ) : (
                   chatMessages.map((msg, index) => (
-                    <div key={index} className="flex items-start space-x-3">
-                      <div className="w-8 h-8 bg-indigo-500 rounded-full flex items-center justify-center text-white font-semibold text-xs flex-shrink-0">
-                        {msg.userName?.charAt(0)?.toUpperCase() || 'U'}
+                    <div key={index} className="flex items-start space-x-3 animate-slideUp">
+                      <div className={`w-10 h-10 ${getAvatarColor(msg.userName)} rounded-full flex items-center justify-center shadow-md flex-shrink-0`}>
+                        <span className="text-white font-bold text-sm">
+                          {msg.userName?.charAt(0)?.toUpperCase() || 'U'}
+                        </span>
                       </div>
-                      <div className="flex-1">
+                      <div className="flex-1 bg-white rounded-2xl px-4 py-3 shadow-sm">
                         <div className="flex items-center space-x-2 mb-1">
-                          <span className="font-medium text-gray-800 text-sm">{msg.userName}</span>
-                          <span className="text-xs text-gray-500">
-                            {new Date(msg.createdAt).toLocaleTimeString()}
+                          <span className="font-semibold text-gray-800 text-sm">{msg.userName}</span>
+                          <span className="text-xs text-gray-400">
+                            {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
                         </div>
+
                         {msg.messageType === 'media' ? (
-                          <div className="text-sm">
-                            <p className="text-gray-700">{msg.message}</p>
+                          <div>
+                            <p className="text-gray-700 text-sm mb-2">{msg.message}</p>
                             {(msg.mediaData || msg.mediaUrl) && (
                               <div className="mt-2">
-                                {/* File info */}
-                                <div className="text-xs text-gray-500 mb-2">
-                                  {msg.fileName && <span>File: {msg.fileName}</span>}
-                                  {msg.fileSize && (
-                                    <span className="ml-2">
-                                      Size: {(msg.fileSize / 1024 / 1024).toFixed(2)} MB
-                                    </span>
-                                  )}
-                                </div>
-                                
-                                                                 {/* Media display based on MIME type */}
-                                 {msg.mimeType && msg.mimeType.startsWith('image/') ? (
-                                   <div className="relative group">
-                                     <img 
-                                       src={msg.mediaData || msg.mediaUrl} 
-                                       alt="Shared image" 
-                                       className="max-w-xs max-h-64 rounded-lg border cursor-pointer hover:opacity-90 transition-opacity"
-                                       onError={(e) => {
-                                         console.error('Failed to load image:', e);
-                                         e.target.style.display = 'none';
-                                         e.target.nextSibling.style.display = 'block';
-                                       }}
-                                       onClick={() => {
-                                         const url = msg.mediaData || msg.mediaUrl;
-                                         const win = window.open();
-                                         win.document.write(`<img src="${url}" style="max-width: 100%; height: auto;" />`);
-                                       }}
-                                     />
-                                     <div 
-                                       className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all rounded-lg flex items-center justify-center"
-                                       style={{ display: 'none' }}
-                                     >
-                                       <span className="text-white opacity-0 group-hover:opacity-100 text-xs">Click to enlarge</span>
-                                     </div>
-                                     <div 
-                                       className="bg-red-50 border border-red-200 rounded-lg p-3 text-center"
-                                       style={{ display: 'none' }}
-                                     >
-                                       <p className="text-red-600 text-sm">⚠️ Image failed to load</p>
-                                       <p className="text-xs text-gray-500 mt-1">Data may be corrupted or too large</p>
-                                     </div>
-                                   </div>
-                                ) : msg.mimeType && msg.mimeType.startsWith('audio/') ? (
-                                  <div className="bg-gray-100 p-3 rounded-lg">
-                                    <div className="flex items-center space-x-2 mb-2">
-                                      <span className="text-blue-600">🎵</span>
-                                      <span className="text-sm font-medium">Audio File</span>
-                                    </div>
-                                    <audio controls className="w-full">
-                                      <source src={msg.mediaData || msg.mediaUrl} type={msg.mimeType} />
-                                      Your browser does not support audio playback.
-                                    </audio>
-                                  </div>
-                                ) : msg.mimeType && msg.mimeType.startsWith('video/') ? (
-                                  <div className="bg-gray-100 p-3 rounded-lg">
-                                    <div className="flex items-center space-x-2 mb-2">
-                                      <span className="text-red-600">🎬</span>
-                                      <span className="text-sm font-medium">Video File</span>
-                                    </div>
-                                    <video controls className="max-w-xs rounded-lg">
-                                      <source src={msg.mediaData || msg.mediaUrl} type={msg.mimeType} />
-                                      Your browser does not support video playback.
-                                    </video>
-                                  </div>
-                                ) : msg.mimeType === 'application/pdf' ? (
-                                  <div className="bg-gray-100 p-3 rounded-lg">
-                                    <div className="flex items-center space-x-2 mb-2">
-                                      <span className="text-red-600">📄</span>
-                                      <span className="text-sm font-medium">PDF Document</span>
-                                    </div>
-                                    <a 
-                                      href={msg.mediaData || msg.mediaUrl} 
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="inline-flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
-                                    >
-                                      <span>📖</span>
-                                      <span>View PDF</span>
-                                    </a>
-                                  </div>
+                                {msg.mimeType?.startsWith('image/') ? (
+                                  <img
+                                    src={msg.mediaData || msg.mediaUrl}
+                                    alt="Shared"
+                                    className="max-w-sm max-h-64 rounded-lg border-2 border-gray-200 cursor-pointer hover:border-purple-400 transition-all duration-200"
+                                    onClick={() => window.open(msg.mediaData || msg.mediaUrl)}
+                                  />
+                                ) : msg.mimeType?.startsWith('audio/') ? (
+                                  <audio controls className="w-full max-w-sm">
+                                    <source src={msg.mediaData || msg.mediaUrl} type={msg.mimeType} />
+                                  </audio>
+                                ) : msg.mimeType?.startsWith('video/') ? (
+                                  <video controls className="max-w-sm rounded-lg">
+                                    <source src={msg.mediaData || msg.mediaUrl} type={msg.mimeType} />
+                                  </video>
                                 ) : (
-                                  <div className="bg-gray-100 p-3 rounded-lg">
-                                    <div className="flex items-center space-x-2 mb-2">
-                                      <span className="text-gray-600">📎</span>
-                                      <span className="text-sm font-medium">File Attachment</span>
-                                    </div>
-                                    <a 
-                                      href={msg.mediaData || msg.mediaUrl} 
-                                      download={msg.fileName}
-                                      className="inline-flex items-center space-x-2 bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm transition-colors"
-                                    >
-                                      <span>⬇️</span>
-                                      <span>Download {msg.fileName}</span>
-                                    </a>
-                                  </div>
+                                  <a
+                                    href={msg.mediaData || msg.mediaUrl}
+                                    download={msg.fileName}
+                                    className="inline-flex items-center space-x-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm transition-all duration-200"
+                                  >
+                                    {getFileIcon(msg.mimeType)}
+                                    <span>Download {msg.fileName}</span>
+                                  </a>
                                 )}
                               </div>
                             )}
                           </div>
                         ) : (
-                          <p className="text-gray-700 text-sm">{msg.message}</p>
+                          <p className="text-gray-700 text-sm whitespace-pre-wrap">{msg.message}</p>
                         )}
                       </div>
                     </div>
                   ))
                 )}
+                <div ref={chatEndRef} />
               </div>
-              
-                             {/* Message Input */}
-               <div className="flex space-x-3">
-                 <input
-                   type="text"
-                   value={message}
-                   onChange={(e) => setMessage(e.target.value)}
-                   onKeyPress={handleKeyPress}
-                   placeholder="Type your message..."
-                   className="flex-1 px-4 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-purple-500 transition-colors duration-200"
-                 />
-                 
-                 {/* Media Attachment Button */}
-                 <button
-                   onClick={() => setShowMediaPanel(!showMediaPanel)}
-                   className={`px-4 py-2 rounded-lg font-semibold transition-colors duration-200 flex items-center space-x-2 ${
-                     showMediaPanel 
-                       ? 'bg-purple-600 text-white' 
-                       : roomSettings.allow_media
-                         ? 'bg-blue-500 hover:bg-blue-600 text-white'
-                         : 'bg-gray-400 text-gray-600 cursor-not-allowed'
-                   }`}
-                   title={roomSettings.allow_media ? "Attach media" : "Media sharing disabled by host"}
-                   disabled={!roomSettings.allow_media}
-                 >
-                   <span>📎</span>
-                   <span className="hidden sm:inline">Media</span>
-                 </button>
-                 
-                 <button
-                   onClick={handleSendMessage}
-                   disabled={!message.trim()}
-                   className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white font-semibold px-6 py-2 rounded-lg transition-colors duration-200"
-                 >
-                   Send
-                 </button>
-               </div>
-              
-                             {/* Quick Media Upload Panel */}
-               {showMediaPanel && (
-                 <div className="mt-3 p-4 bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg border-2 border-purple-200">
-                                        <div className="flex items-center justify-between mb-3">
-                       <h4 className="font-semibold text-gray-800 flex items-center">
-                         <span className="mr-2">📎</span>
-                         Attach Media
-                       </h4>
-                       <button
-                         onClick={() => setShowMediaPanel(false)}
-                         className="text-gray-500 hover:text-gray-700 text-sm"
-                       >
-                         ✕
-                       </button>
-                     </div>
-                     
-                     {!roomSettings.allow_media && (
-                       <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-3">
-                         <div className="flex items-center">
-                           <span className="text-yellow-600 mr-2">⚠️</span>
-                           <span className="text-yellow-800 text-sm">
-                             Media sharing is currently disabled by the host.
-                           </span>
-                         </div>
-                       </div>
-                     )}
-                   
-                                        <div className="flex items-center space-x-3 mb-3">
-                       <input
-                         type="file"
-                         onChange={handleMediaFileChange}
-                         accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt"
-                         disabled={!roomSettings.allow_media}
-                         className={`flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-purple-500 ${
-                           !roomSettings.allow_media ? 'bg-gray-100 cursor-not-allowed' : ''
-                         }`}
-                       />
-                     {mediaFile && (
-                       <button
-                         onClick={handleSendMedia}
-                         disabled={isUploadingMedia}
-                         className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white text-sm px-4 py-2 rounded-lg transition-colors duration-200 flex items-center space-x-2"
-                       >
-                         {isUploadingMedia ? (
-                           <>
-                             <span className="animate-spin">⏳</span>
-                             <span>Processing...</span>
-                           </>
-                         ) : (
-                           <>
-                             <span>📤</span>
-                             <span>Send</span>
-                           </>
-                         )}
-                       </button>
-                     )}
-                   </div>
-                   
-                   {mediaFile && (
-                     <div className="bg-white p-3 rounded-lg border">
-                       <div className="flex items-center space-x-3">
-                         <div className="text-2xl">
-                           {mediaFile.type.startsWith('image/') ? '🖼️' : 
-                            mediaFile.type.startsWith('audio/') ? '🎵' : 
-                            mediaFile.type.startsWith('video/') ? '🎬' : 
-                            mediaFile.type === 'application/pdf' ? '📄' : '📎'}
-                         </div>
-                         <div className="flex-1">
-                           <p className="font-medium text-gray-800 text-sm">{mediaFile.name}</p>
-                           <p className="text-xs text-gray-500">
-                             {(mediaFile.size / 1024 / 1024).toFixed(2)} MB • {mediaFile.type}
-                           </p>
-                         </div>
-                         <button
-                           onClick={() => {
-                             setMediaFile(null);
-                             const fileInput = document.querySelector('input[type="file"]');
-                             if (fileInput) fileInput.value = '';
-                           }}
-                           className="text-red-500 hover:text-red-700 text-sm"
-                         >
-                           ✕
-                         </button>
-                       </div>
-                       
-                       {/* Upload Progress Bar */}
-                       {isUploadingMedia && (
-                         <div className="mt-3">
-                           <div className="flex justify-between text-xs text-gray-600 mb-1">
-                             <span>Processing file...</span>
-                             <span>{uploadProgress.toFixed(1)}%</span>
-                           </div>
-                           <div className="w-full bg-gray-200 rounded-full h-2">
-                             <div 
-                               className="bg-purple-600 h-2 rounded-full transition-all duration-300"
-                               style={{ width: `${uploadProgress}%` }}
-                             ></div>
-                           </div>
-                         </div>
-                       )}
-                     </div>
-                   )}
-                   
-                   <div className="text-xs text-gray-500 mt-2">
-                     <p>Supported: Images, Audio, Video, PDF, Documents (Max 5MB)</p>
-                   </div>
-                 </div>
-               )}
+
+              {/* Message Input */}
+              <div className="border-t border-gray-200 p-4 bg-white">
+                {showMediaPanel && (
+                  <div className="mb-4 p-4 bg-gradient-to-r from-purple-50 to-blue-50 rounded-xl border-2 border-purple-200">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-semibold text-gray-800 flex items-center">
+                        <Upload className="w-4 h-4 mr-2" />
+                        Attach Media
+                      </h4>
+                      <button
+                        onClick={() => {
+                          setShowMediaPanel(false);
+                          setMediaFile(null);
+                        }}
+                        className="text-gray-500 hover:text-gray-700"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    <input
+                      type="file"
+                      onChange={handleMediaFileChange}
+                      accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt"
+                      disabled={!roomSettings.allow_media}
+                      className="w-full text-sm"
+                    />
+
+                    {mediaFile && (
+                      <div className="mt-3 p-3 bg-white rounded-lg border border-gray-200">
+                        <div className="flex items-center space-x-3">
+                          <div className="text-purple-600">
+                            {getFileIcon(mediaFile.type)}
+                          </div>
+                          <div className="flex-1">
+                            <p className="font-medium text-gray-800 text-sm">{mediaFile.name}</p>
+                            <p className="text-xs text-gray-500">{formatFileSize(mediaFile.size)} MB</p>
+                          </div>
+                          <button
+                            onClick={handleSendMedia}
+                            disabled={isUploadingMedia}
+                            className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center space-x-2 transition-all duration-200"
+                          >
+                            {isUploadingMedia ? (
+                              <>
+                                <Loader className="w-4 h-4 animate-spin" />
+                                <span>{uploadProgress}%</span>
+                              </>
+                            ) : (
+                              <>
+                                <Send className="w-4 h-4" />
+                                <span>Send</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        {isUploadingMedia && (
+                          <div className="mt-2">
+                            <div className="w-full bg-gray-200 rounded-full h-2">
+                              <div
+                                className="bg-purple-600 h-2 rounded-full transition-all duration-300"
+                                style={{ width: `${uploadProgress}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex items-center space-x-3">
+                  <button
+                    onClick={() => setShowMediaPanel(!showMediaPanel)}
+                    disabled={!roomSettings.allow_media}
+                    className={`p-3 rounded-lg transition-all duration-200 ${
+                      roomSettings.allow_media
+                        ? 'bg-gray-100 hover:bg-gray-200 text-gray-700'
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    }`}
+                    title={roomSettings.allow_media ? 'Attach media' : 'Media disabled by host'}
+                  >
+                    <Paperclip className="w-5 h-5" />
+                  </button>
+
+                  <input
+                    type="text"
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    onKeyPress={handleKeyPress}
+                    placeholder="Type a message..."
+                    className="flex-1 px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-purple-500 transition-colors duration-200"
+                  />
+
+                  <button
+                    onClick={handleSendMessage}
+                    disabled={!message.trim()}
+                    className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:from-gray-400 disabled:to-gray-400 text-white p-3 rounded-lg shadow-md transition-all duration-200"
+                  >
+                    <Send className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-
-        {/* Media Sharing Section */}
-        {roomSettings.allow_media && (
-          <div className="bg-white bg-opacity-80 backdrop-blur-lg rounded-2xl shadow-xl p-6 mt-6">
-            <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
-              📁 Share Media
-            </h3>
-            
-            {/* Drag and Drop Area */}
-            <div 
-              className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center mb-4 hover:border-purple-500 transition-colors duration-200"
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.currentTarget.classList.add('border-purple-500', 'bg-purple-50');
-              }}
-              onDragLeave={(e) => {
-                e.preventDefault();
-                e.currentTarget.classList.remove('border-purple-500', 'bg-purple-50');
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                e.currentTarget.classList.remove('border-purple-500', 'bg-purple-50');
-                const files = e.dataTransfer.files;
-                if (files.length > 0) {
-                  handleMediaFileChange({ target: { files: [files[0]] } });
-                }
-              }}
-            >
-              <div className="text-gray-500">
-                <div className="text-4xl mb-2">📁</div>
-                <p className="text-lg font-medium mb-2">Drop files here or click to browse</p>
-                                 <p className="text-sm">Supports: Images, Audio, Video, PDF, Documents (Max 5MB)</p>
-              </div>
-            </div>
-            
-            {/* File Input */}
-            <div className="flex items-center space-x-4 mb-4">
-              <input
-                id="media-file-input"
-                type="file"
-                onChange={handleMediaFileChange}
-                accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt"
-                className="flex-1 px-3 py-2 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-purple-500 transition-colors duration-200"
-              />
-            </div>
-            
-            {/* Selected File Info */}
-            {mediaFile && (
-              <div className="bg-gray-50 rounded-lg p-4 mb-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="text-2xl">
-                      {mediaFile.type.startsWith('image/') ? '🖼️' : 
-                       mediaFile.type.startsWith('audio/') ? '🎵' : 
-                       mediaFile.type.startsWith('video/') ? '🎬' : 
-                       mediaFile.type === 'application/pdf' ? '📄' : '📎'}
-                    </div>
-                    <div>
-                      <p className="font-medium text-gray-800">{mediaFile.name}</p>
-                      <p className="text-sm text-gray-500">
-                        {(mediaFile.size / 1024 / 1024).toFixed(2)} MB • {mediaFile.type}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() => {
-                        setMediaFile(null);
-                        const fileInput = document.getElementById('media-file-input');
-                        if (fileInput) fileInput.value = '';
-                      }}
-                      className="text-red-500 hover:text-red-700 text-sm"
-                    >
-                      ✕
-                    </button>
-                    <button
-                      onClick={handleSendMedia}
-                      disabled={isUploadingMedia}
-                      className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold px-4 py-2 rounded-lg transition-colors duration-200 flex items-center space-x-2"
-                    >
-                      {isUploadingMedia ? (
-                        <>
-                          <span className="animate-spin">⏳</span>
-                          <span>Uploading...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>📤</span>
-                          <span>Share</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-                
-                {/* Upload Progress Bar */}
-                {isUploadingMedia && (
-                  <div className="mt-3">
-                    <div className="flex justify-between text-xs text-gray-600 mb-1">
-                      <span>Uploading...</span>
-                      <span>{uploadProgress.toFixed(1)}%</span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div 
-                        className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${uploadProgress}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-            
-            {/* File Type Info */}
-            <div className="text-xs text-gray-500">
-              <p>Supported formats: JPG, PNG, GIF, MP3, WAV, MP4, PDF, DOC, TXT (Max 5MB per file)</p>
-            </div>
-          </div>
-        )}
-
-        {/* Hidden audio element for peer connections */}
-        <audio ref={audioRef} autoPlay className="hidden" />
       </div>
+
+      {/* Hidden audio element */}
+      <audio ref={audioRef} autoPlay className="hidden" />
     </div>
   );
 };
 
 export default AudioRoomComponent;
-

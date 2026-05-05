@@ -10,7 +10,7 @@ const InstrumentPage = () => {
   const navigate = useNavigate();
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-purple-200 via-pink-100 to-yellow-50 p-6 font-sans">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-purple-200 via-pink-100 to-yellow-50 p-6 font-sans" style={{width: '100%', maxWidth: 'none'}}>
       {/* Fixed Logo at Top Left like HomePage */}
       <div className="fixed top-4 left-4 z-50">
         <LogoWithText />

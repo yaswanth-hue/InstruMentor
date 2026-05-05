@@ -1,39 +1,46 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  auth, 
-  getUserProfile, 
-  getFeedPosts, 
-  getPosts, 
-  createPost, 
+import { Helmet } from 'react-helmet-async';
+import {
+  auth,
+  getUserProfile,
+  getFeedPosts,
+  getPosts,
+  createPost,
   createUserProfile,
   createStory,
   getStoriesGroupedByUser,
-  markStoryAsViewed 
+  markStoryAsViewed,
+  likePost,
+  unlikePost,
+  addComment
 } from '../firebase';
-import { 
-  Heart, 
-  MessageCircle, 
-  Share2, 
-  Music, 
-  Home,
-  Users,
-  BookOpen,
+import {
   Mail,
   PlusCircle,
-  Image,
-  X,
+  Home,
+  BookOpen,
   User,
-  Mic,
+  Users,
+  Sparkles,
+  Music,
   Camera,
-  Play,
+  ChevronRight,
   ChevronLeft,
-  ChevronRight
+  Heart,
+  MessageCircle,
+  Share2,
+  Image,
+  Mic,
+  Send,
+  X
 } from 'lucide-react';
-import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { storage } from '../firebase';
+import StoriesBar from '../components/social/StoriesBar';
+import QuickAccessPanel from '../components/social/QuickAccessPanel';
+import TrendingPanel from '../components/social/TrendingPanel';
 
-// Import instrument images
+// Import instrument images and logo
+import logoImg from "../assets/logo.png";
 import drumsImg from "../assets/photos/drums.png";
 import fluteImg from "../assets/photos/flute.png";
 import guitarImg from "../assets/photos/guitar.png";
@@ -42,17 +49,6 @@ import harmoniumImg from "../assets/photos/harmonium.png";
 import saxophoneImg from "../assets/photos/saxophone.png";
 import keyboardImg from "../assets/photos/keyboard.png";
 import violinImg from "../assets/photos/violin.png";
-
-const instruments = [
-  { name: "drums", image: drumsImg, virtualLink: "https://www.sessiontown.com/en/music-games-apps/virtual-instrument-play-drums-online" },
-  { name: "flute", image: fluteImg, virtualLink: "https://www.virtualmusicalinstruments.com/flute" },
-  { name: "guitar", image: guitarImg, virtualLink: "https://www.musicca.com/guitar" },
-  { name: "tabla", image: tablaImg, virtualLink: "https://artiumacademy.com/tools/tabla" },
-  { name: "harmonium", image: harmoniumImg, virtualLink: "https://music-tools.spardhaschoolofmusic.com/harmonium" },
-  { name: "saxophone", image: saxophoneImg, virtualLink: "https://www.trumpetfingering.com/virtual-saxophone" },
-  { name: "keyboard", image: keyboardImg, virtualLink: "https://www.sessiontown.com/en/music-games-apps/online-virtual-keyboard-piano" },
-  { name: "violin", image: violinImg, virtualLink: "https://www.ecarddesignanimation.com/home/violin_html5.php" },
-];
 
 const SocialHomePage = () => {
   const navigate = useNavigate();
@@ -66,18 +62,69 @@ const SocialHomePage = () => {
   const [activeTab, setActiveTab] = useState('following');
   const [stories, setStories] = useState({});
   const [showCreateStory, setShowCreateStory] = useState(false);
-  const [storyImage, setStoryImage] = useState(null);
+  const [storyImages, setStoryImages] = useState([]);
   const [storyText, setStoryText] = useState('');
   const [uploadingStory, setUploadingStory] = useState(false);
   const [showStoryViewer, setShowStoryViewer] = useState(false);
   const [currentStoryUser, setCurrentStoryUser] = useState(null);
   const [currentStoryIndex, setCurrentStoryIndex] = useState(0);
+  const [trendingHashtags, setTrendingHashtags] = useState([]);
+  const [likedPosts, setLikedPosts] = useState({});
+  const [showCommentModal, setShowCommentModal] = useState(false);
+  const [currentCommentPost, setCurrentCommentPost] = useState(null);
+  const [commentText, setCommentText] = useState('');
+  const [submittingComment, setSubmittingComment] = useState(false);
+  const [selectedPostModal, setSelectedPostModal] = useState(null);
+  const [showQuickAccess, setShowQuickAccess] = useState(false);
+  const [showTrending, setShowTrending] = useState(false);
+  const [hasUnseenMessages, setHasUnseenMessages] = useState(false);
+  const [postMediaType, setPostMediaType] = useState('post'); // post, reel, video
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [currentPostIndex, setCurrentPostIndex] = useState(0);
+  const [viewerPosts, setViewerPosts] = useState([]);
+  const [showLikesModal, setShowLikesModal] = useState(false);
+  const [likesList, setLikesList] = useState([]);
 
   useEffect(() => {
-    loadData();
+    const abortController = new AbortController();
+
+    loadData(abortController.signal);
+
+    // Cleanup function - abort requests when activeTab changes or component unmounts
+    return () => {
+      abortController.abort();
+    };
   }, [activeTab]);
 
-  const loadData = async () => {
+  // Reload profile when component mounts or when user returns to tab
+  useEffect(() => {
+    const handleFocus = () => {
+      // Reload user profile when tab gains focus
+      if (auth.currentUser?.uid) {
+        console.log("SocialHomePage: Reloading profile on focus");
+        getUserProfile(auth.currentUser.uid).then(profile => {
+          if (profile) {
+            console.log("SocialHomePage: Profile loaded from DB:", profile.profilePic);
+            console.log("SocialHomePage: Auth photoURL:", auth.currentUser.photoURL);
+            setUserProfile(profile);
+          }
+        });
+      }
+    };
+
+    // Add focus listener
+    window.addEventListener('focus', handleFocus);
+
+    // Initial load
+    handleFocus();
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
+
+  const loadData = async (signal) => {
     const userId = auth.currentUser?.uid;
     if (!userId) {
       navigate('/login');
@@ -86,128 +133,100 @@ const SocialHomePage = () => {
 
     try {
       setLoading(true);
-      
+
       // Get or create user profile
       let profile = await getUserProfile(userId);
+
+      // Check if aborted
+      if (signal?.aborted) return;
+
       if (!profile) {
+        // Get existing profile pic from Firestore if it exists, otherwise null
         await createUserProfile(userId, {
           displayName: auth.currentUser.displayName || auth.currentUser.email,
-          profilePic: auth.currentUser.photoURL || null,
+          profilePic: null, // Don't use Firebase Auth photoURL
           email: auth.currentUser.email
         });
+
+        // Check if aborted
+        if (signal?.aborted) return;
+
         profile = await getUserProfile(userId);
       }
+
+      // Check if aborted
+      if (signal?.aborted) return;
+
       setUserProfile(profile);
 
       // Load stories
-      const storiesData = await getStoriesGroupedByUser(profile?.following || []);
-      
-      // Add user info to stories
-      const storiesWithUserInfo = {};
-      for (const [userId, userStories] of Object.entries(storiesData)) {
-        const userInfo = await getUserProfile(userId);
-        storiesWithUserInfo[userId] = {
-          userInfo,
-          stories: userStories
-        };
-      }
-      setStories(storiesWithUserInfo);
+      const storiesData = await getStoriesGroupedByUser();
 
-      // Load feed posts based on active tab
+      // Check if aborted
+      if (signal?.aborted) return;
+
+      setStories(storiesData);
+
+      // Load feed based on active tab
       let posts = [];
-      if (activeTab === 'following' && profile?.following?.length > 0) {
-        posts = await getFeedPosts(profile.following);
+      if (activeTab === 'following') {
+        if (profile?.following?.length > 0) {
+          posts = await getFeedPosts(profile.following);
+        } else {
+          posts = [];
+        }
       } else if (activeTab === 'explore') {
-        posts = await getPosts(); // Get all recent posts
-      } else if (activeTab === 'following') {
-        // If following tab but no following, show empty with suggestion
-        posts = [];
+        posts = await getPosts(); // Always show all posts
       }
 
-      // Add user info to posts
-      const postsWithUserInfo = await Promise.all(
-        posts.slice(0, 10).map(async (post) => {
-          const postUser = await getUserProfile(post.userId);
-          return { ...post, userInfo: postUser };
-        })
-      );
+      // Check if aborted
+      if (signal?.aborted) return;
 
-      setFeed(postsWithUserInfo);
-    } catch (error) {
-      console.error('Error loading data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+      setFeed(posts);
 
-  const handleCreatePost = async () => {
-    if (!postContent.trim() && !postImage) return;
+      // Track liked posts for current user
+      const currentUserId = auth.currentUser?.uid;
+      const liked = {};
+      posts.forEach(post => {
+        if (post.likes && post.likes.includes(currentUserId)) {
+          liked[post.id] = true;
+        }
+      });
+      setLikedPosts(liked);
 
-    setUploadingPost(true);
-    try {
-      let mediaUrl = null;
-      
-      if (postImage) {
-        const imageRef = storageRef(storage, `posts/${auth.currentUser.uid}/${Date.now()}`);
-        await uploadBytes(imageRef, postImage);
-        mediaUrl = await getDownloadURL(imageRef);
-      }
-
-      await createPost({
-        userId: auth.currentUser.uid,
-        userName: auth.currentUser.displayName || auth.currentUser.email,
-        content: postContent,
-        mediaUrl: mediaUrl
+      // Calculate trending hashtags
+      const hashtags = {};
+      posts.forEach(post => {
+        const matches = post.content?.match(/#[\w]+/g);
+        if (matches) {
+          matches.forEach(tag => {
+            hashtags[tag] = (hashtags[tag] || 0) + 1;
+          });
+        }
       });
 
-      setPostContent('');
-      setPostImage(null);
-      setShowCreatePost(false);
-      await loadData(); // Reload feed
+      const trending = Object.entries(hashtags)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([tag, count]) => ({ tag, count }));
+
+      // Check if aborted before final state update
+      if (signal?.aborted) return;
+
+      setTrendingHashtags(trending);
+
     } catch (error) {
-      console.error('Error creating post:', error);
-      alert('Failed to create post. Please try again.');
+      if (error.name !== 'AbortError') {
+        console.error('Error loading data:', error);
+      }
     } finally {
-      setUploadingPost(false);
+      if (!signal?.aborted) {
+        setLoading(false);
+      }
     }
   };
 
-  const handleImageSelect = (e) => {
-    const file = e.target.files[0];
-    if (file && file.type.startsWith('image/')) {
-      setPostImage(file);
-    }
-  };
 
-  const handleStoryImageSelect = (e) => {
-    const file = e.target.files[0];
-    if (file && file.type.startsWith('image/')) {
-      setStoryImage(file);
-    }
-  };
-
-  const handleCreateStory = async () => {
-    if (!storyText.trim() && !storyImage) return;
-
-    setUploadingStory(true);
-    try {
-      await createStory({
-        userId: auth.currentUser.uid,
-        userName: auth.currentUser.displayName || auth.currentUser.email,
-        text: storyText
-      }, storyImage);
-
-      setStoryText('');
-      setStoryImage(null);
-      setShowCreateStory(false);
-      await loadData(); // Reload to get new stories
-    } catch (error) {
-      console.error('Error creating story:', error);
-      alert('Failed to create story. Please try again.');
-    } finally {
-      setUploadingStory(false);
-    }
-  };
 
   const openStoryViewer = (userId, startIndex = 0) => {
     setCurrentStoryUser(userId);
@@ -221,643 +240,1371 @@ const SocialHomePage = () => {
     setCurrentStoryIndex(0);
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
-      </div>
-    );
-  }
+  const handleCreatePost = async () => {
+    if (!postImage) {
+      alert('Please add media to your post');
+      return;
+    }
+
+    const isVideo = postImage.type.startsWith('video/');
+    const isImage = postImage.type.startsWith('image/');
+
+    if (isImage && (postMediaType === 'reel' || postMediaType === 'video')) {
+      alert('Images cannot be uploaded as Vibes or Streams. Please select "Post" type.');
+      return;
+    }
+
+    if (isVideo && postMediaType === 'post') {
+      alert('Videos cannot be uploaded as regular Posts. Please select "Vibe" or "Stream" type.');
+      return;
+    }
+
+    if (postMediaType === 'reel' && videoDuration > 120) {
+      alert('Vibes (Reels) must be 2 minutes or less. Please select "Streams" for longer videos.');
+      return;
+    }
+
+    try {
+      setUploadingPost(true);
+      await createPost({
+        content: postContent,
+        userId: auth.currentUser.uid,
+        userName: userProfile.displayName,
+        userProfilePic: userProfile.profilePic,
+        mediaType: postMediaType,
+        videoDuration: videoDuration || 0
+      }, postImage);
+
+      setPostContent('');
+      setPostImage(null);
+      setPostMediaType('post');
+      setVideoDuration(0);
+      setShowCreatePost(false);
+      await loadData();
+    } catch (error) {
+      console.error('Error creating post:', error);
+      alert('Failed to create post. Please try again.');
+    } finally {
+      setUploadingPost(false);
+    }
+  };
+
+  const handleCreateStory = async () => {
+    if (storyImages.length === 0 && !storyText.trim()) {
+      alert('Please add at least one image or text to your update');
+      return;
+    }
+
+    try {
+      setUploadingStory(true);
+      await createStory({
+        userId: auth.currentUser.uid,
+        userName: userProfile.displayName,
+        userProfilePic: userProfile.profilePic,
+        text: storyText
+      }, storyImages);
+
+      setStoryText('');
+      setStoryImages([]);
+      setShowCreateStory(false);
+      await loadData();
+    } catch (error) {
+      console.error('Error creating update:', error);
+      alert('Failed to create update. Please try again.');
+    } finally {
+      setUploadingStory(false);
+    }
+  };
+
+  const handleLikePost = async (postId) => {
+    const userId = auth.currentUser?.uid;
+    if (!userId) return;
+
+    try {
+      if (likedPosts[postId]) {
+        await unlikePost(postId, userId);
+        setLikedPosts(prev => ({ ...prev, [postId]: false }));
+        setFeed(prevFeed => prevFeed.map(post =>
+          post.id === postId
+            ? { ...post, likes: post.likes.filter(id => id !== userId) }
+            : post
+        ));
+      } else {
+        await likePost(postId, userId);
+        setLikedPosts(prev => ({ ...prev, [postId]: true }));
+        setFeed(prevFeed => prevFeed.map(post =>
+          post.id === postId
+            ? { ...post, likes: [...(post.likes || []), userId] }
+            : post
+        ));
+      }
+    } catch (error) {
+      console.error('Error liking/unliking post:', error);
+    }
+  };
+
+  const openCommentModal = (post) => {
+    setCurrentCommentPost(post);
+    setShowCommentModal(true);
+  };
+
+  const closeCommentModal = () => {
+    setShowCommentModal(false);
+    setCurrentCommentPost(null);
+    setCommentText('');
+  };
+
+  const handleAddComment = async () => {
+    if (!commentText.trim() || !currentCommentPost) return;
+
+    try {
+      setSubmittingComment(true);
+      await addComment(currentCommentPost.id, {
+        userId: auth.currentUser.uid,
+        userName: userProfile.displayName,
+        userProfilePic: userProfile.profilePic,
+        text: commentText
+      });
+
+      setFeed(prevFeed => prevFeed.map(post =>
+        post.id === currentCommentPost.id
+          ? {
+            ...post,
+            comments: [
+              ...(post.comments || []),
+              {
+                userId: auth.currentUser.uid,
+                userName: userProfile.displayName,
+                userProfilePic: userProfile.profilePic,
+                text: commentText,
+                timestamp: new Date().toISOString()
+              }
+            ]
+          }
+          : post
+      ));
+
+      setCommentText('');
+      closeCommentModal();
+    } catch (error) {
+      console.error('Error adding comment:', error);
+      alert('Failed to add comment. Please try again.');
+    } finally {
+      setSubmittingComment(false);
+    }
+  };
+
+  const openPostModal = (post, index, allPosts) => {
+    setViewerPosts(allPosts);
+    setCurrentPostIndex(index);
+    setSelectedPostModal(post);
+  };
+
+  const closePostModal = () => {
+    setSelectedPostModal(null);
+    setViewerPosts([]);
+    setCurrentPostIndex(0);
+  };
+
+  const loadLikesList = async (post) => {
+    if (!post?.likes || post.likes.length === 0) {
+      setLikesList([]);
+      return;
+    }
+
+    try {
+      const likesData = await Promise.all(
+        post.likes.map(async (userId) => {
+          const userProfile = await getUserProfile(userId);
+          return userProfile ? { id: userId, ...userProfile } : null;
+        })
+      );
+      setLikesList(likesData.filter(Boolean));
+    } catch (error) {
+      console.error('Error loading likes:', error);
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-yellow-50 via-pink-100 to-purple-200">
-      {/* Header */}
-      <div className="bg-white/80 backdrop-blur-md shadow-sm sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex justify-between items-center">
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
-              🎵 Music Universe
-            </h1>
-            <div className="flex items-center gap-4">
+    <>
+      <Helmet>
+        <title>Home | InstruMentor</title>
+      </Helmet>
+      <div
+        className="min-h-screen bg-gradient-to-b from-zinc-950 via-neutral-950 to-zinc-950 text-white"
+        style={{ width: '100%', maxWidth: 'none' }}
+      >
+        {/* Header */}
+        <header className="sticky top-0 z-50 bg-zinc-950/80 backdrop-blur-2xl border-b border-white/5">
+          <div className="w-full px-4 sm:px-6 lg:px-8">
+            <div className="flex items-center justify-between h-16 sm:h-20">
+              {/* Logo */}
               <button
-                onClick={() => navigate('/messages')}
-                className="bg-pink-600 hover:bg-pink-700 text-white px-4 py-2 rounded-full flex items-center gap-2 transition-all shadow-lg"
+                type="button"
+                onClick={() => navigate('/home')}
+                className="flex items-center gap-3 rounded-2xl px-2 py-1 hover:bg-white/5 transition-colors"
               >
-                <Mail className="w-5 h-5" />
-                <span className="hidden sm:inline">Messages</span>
-              </button>
-              <button
-                onClick={() => setShowCreatePost(true)}
-                className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-full flex items-center gap-2 transition-all shadow-lg"
-              >
-                <PlusCircle className="w-5 h-5" />
-                <span className="hidden sm:inline">Share</span>
-              </button>
-              <button
-                onClick={() => navigate(`/profile`)}
-                className="w-10 h-10 rounded-full bg-purple-200 flex items-center justify-center hover:bg-purple-300 transition-colors"
-              >
-                {userProfile?.profilePic ? (
-                  <img 
-                    src={userProfile.profilePic} 
-                    alt="Profile"
-                    className="w-full h-full rounded-full object-cover"
+                <div className="relative h-10 w-10 rounded-2xl overflow-hidden border border-white/10 bg-zinc-900/80">
+                  <img
+                    src={logoImg}
+                    alt="InstruMentor logo"
+                    className="h-full w-full object-cover"
                   />
-                ) : (
-                  <User className="w-6 h-6 text-purple-700" />
+                </div>
+                <div className="hidden sm:block text-left">
+                  <h1 className="text-lg sm:text-xl font-semibold tracking-tight">InstruMentor</h1>
+                  <p className="text-[11px] text-zinc-400">Connect · Learn · Collaborate</p>
+                </div>
+              </button>
+
+              {/* Actions */}
+              <div className="flex items-center gap-2 sm:gap-3">
+                <button
+                  onClick={() => navigate('/messages')}
+                  className="relative p-2 sm:p-3 text-zinc-200 hover:text-white hover:bg-white/5 rounded-2xl transition-colors"
+                >
+                  <Mail className="w-5 h-5" />
+                  {hasUnseenMessages && (
+                    <span className="absolute -top-1 -right-1 w-2 h-2 bg-pink-500 rounded-full animate-pulse" />
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowCreatePost(true)}
+                  className="hidden xs:inline-flex px-4 sm:px-5 py-2 sm:py-2.5 bg-gradient-to-r from-amber-400 via-pink-400 to-indigo-400 text-zinc-950 rounded-2xl text-sm font-semibold shadow-lg shadow-amber-400/30 hover:brightness-110 transition-all"
+                >
+                  <PlusCircle className="w-5 h-5" />
+                  <span>Create</span>
+                </button>
+                <button
+                  onClick={() => {
+                    const go = () => navigate(`/profile`);
+                    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
+                      // eslint-disable-next-line no-undef
+                      document.startViewTransition(go);
+                    } else {
+                      go();
+                    }
+                  }}
+                  className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl ring-2 ring-amber-300/40 hover:ring-amber-200 transition-all overflow-hidden hover:scale-105 shadow-md shadow-black/40"
+                >
+                  {userProfile?.profilePic ? (
+                    <img
+                      src={userProfile.profilePic}
+                      alt="Profile"
+                      className="w-full h-full object-cover"
+                      style={{ viewTransitionName: 'profile-avatar' }}
+                    />
+                  ) : (
+                  <div
+                    className="w-full h-full bg-gradient-to-br from-amber-400 via-pink-500 to-indigo-500 flex items-center justify-center"
+                    style={{ viewTransitionName: 'profile-avatar' }}
+                  >
+                      <User className="w-6 h-6 text-white" />
+                    </div>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Navigation Tabs */}
+            <div className="flex gap-6 sm:gap-10 -mb-px pt-1 px-2 text-sm sm:text-base">
+              <button
+                onClick={() => setActiveTab('following')}
+                className={`relative pb-3 sm:pb-4 px-1 font-semibold transition-colors ${activeTab === 'following'
+                  ? 'text-amber-200'
+                  : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Users className="w-5 h-5" />
+                  Following
+                </div>
+                {activeTab === 'following' && (
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-amber-300 via-pink-300 to-indigo-300 rounded-full shadow-[0_0_10px_rgba(251,191,36,0.6)]" />
+                )}
+              </button>
+              <button
+                onClick={() => setActiveTab('explore')}
+                className={`relative pb-3 sm:pb-4 px-1 font-semibold transition-colors ${activeTab === 'explore'
+                  ? 'text-amber-200'
+                  : 'text-zinc-400 hover:text-zinc-200'
+                  }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-5 h-5" />
+                  Explore
+                </div>
+                {activeTab === 'explore' && (
+                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-amber-300 via-pink-300 to-indigo-300 rounded-full shadow-[0_0_10px_rgba(251,191,36,0.6)]" />
                 )}
               </button>
             </div>
           </div>
-        </div>
-        
-        {/* Feed Tabs */}
-        <div className="max-w-7xl mx-auto px-4">
-          <div className="flex gap-6 mt-4 border-b border-white/20">
-            <button
-              onClick={() => setActiveTab('following')}
-              className={`pb-3 px-1 font-medium transition-all ${
-                activeTab === 'following'
-                  ? 'border-b-2 border-white text-white'
-                  : 'text-white/70 hover:text-white'
-              }`}
-            >
-              Following
-            </button>
-            <button
-              onClick={() => setActiveTab('explore')}
-              className={`pb-3 px-1 font-medium transition-all ${
-                activeTab === 'explore'
-                  ? 'border-b-2 border-white text-white'
-                  : 'text-white/70 hover:text-white'
-              }`}
-            >
-              Explore
-            </button>
-          </div>
-        </div>
-      </div>
+        </header>
 
-      {/* Stories Section */}
-      <div className="bg-white/90 backdrop-blur-md border-b">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center gap-4 overflow-x-auto scrollbar-hide">
-            {/* Create Story Button */}
-            <div className="flex-shrink-0">
-              <button
-                onClick={() => setShowCreateStory(true)}
-                className="relative w-16 h-16 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center hover:scale-105 transition-transform shadow-lg"
-              >
-                <Camera className="w-8 h-8 text-white" />
-                <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-purple-600 rounded-full flex items-center justify-center">
-                  <PlusCircle className="w-4 h-4 text-white" />
-                </div>
-              </button>
-              <p className="text-xs text-center mt-1 text-gray-600 font-medium">Your Story</p>
-            </div>
+        {/* Mobile-only slide panels */}
+        <div className="lg:hidden">
+          <QuickAccessPanel show={showQuickAccess} onClose={() => setShowQuickAccess(false)} />
 
-            {/* Stories from other users */}
-            {Object.entries(stories).map(([userId, storyData]) => (
-              <div key={userId} className="flex-shrink-0">
-                <button
-                  onClick={() => openStoryViewer(userId)}
-                  className="relative w-16 h-16 rounded-full p-0.5 bg-gradient-to-r from-purple-500 via-pink-500 to-red-500 hover:scale-105 transition-transform"
-                >
-                  {storyData.userInfo?.profilePic ? (
-                    <img
-                      src={storyData.userInfo.profilePic}
-                      alt={storyData.userInfo.displayName}
-                      className="w-full h-full rounded-full object-cover border-2 border-white"
-                    />
-                  ) : (
-                    <div className="w-full h-full rounded-full bg-purple-200 flex items-center justify-center border-2 border-white">
-                      <User className="w-6 h-6 text-purple-600" />
+          <TrendingPanel
+            show={showTrending}
+            onClose={() => setShowTrending(false)}
+            trendingHashtags={trendingHashtags}
+          />
+
+          {!showQuickAccess && activeTab !== 'explore' && (
+            <button
+              onClick={() => setShowQuickAccess(true)}
+              className="fixed left-2 sm:left-3 top-[calc(50%+36px)] -translate-y-1/2 bg-zinc-950/80 backdrop-blur-2xl text-white p-3 rounded-2xl border border-white/10 shadow-xl shadow-black/40 hover:bg-white/5 transition-colors z-30"
+            >
+              <ChevronRight className="w-6 h-6 text-amber-200" />
+            </button>
+          )}
+
+          {!showTrending && activeTab !== 'explore' && (
+            <button
+              onClick={() => setShowTrending(true)}
+              className="fixed right-2 sm:right-3 top-[calc(50%+36px)] -translate-y-1/2 bg-zinc-950/80 backdrop-blur-2xl text-white p-3 rounded-2xl border border-white/10 shadow-xl shadow-black/40 hover:bg-white/5 transition-colors z-30"
+            >
+              <ChevronLeft className="w-6 h-6 text-amber-200" />
+            </button>
+          )}
+        </div>
+
+        {/* Main Content Area */}
+        <div className="w-full px-3 sm:px-4 lg:px-6 py-6 sm:py-8" style={{ width: '100%', maxWidth: 'none' }}>
+          <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left Sidebar (desktop) */}
+            <aside className="hidden lg:block lg:col-span-3">
+              <div className="sticky top-[92px] space-y-4">
+                <div className="rounded-3xl border border-white/10 bg-zinc-900/60 backdrop-blur-2xl shadow-xl shadow-black/40 p-5">
+                  <div className="flex items-center gap-3">
+                    <div className="h-11 w-11 rounded-2xl overflow-hidden border border-white/10 bg-zinc-900">
+                      <img src={logoImg} alt="InstruMentor" className="h-full w-full object-cover" />
                     </div>
-                  )}
-                  <div className="absolute -bottom-1 right-0 w-5 h-5 bg-green-500 rounded-full border-2 border-white flex items-center justify-center">
-                    <Play className="w-2 h-2 text-white" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-zinc-100 truncate">Navigation</p>
+                      <p className="text-xs text-zinc-400 truncate">Quick access</p>
+                    </div>
                   </div>
-                </button>
-                <p className="text-xs text-center mt-1 text-gray-600 font-medium truncate w-16">
-                  {storyData.userInfo?.displayName?.split(' ')[0] || 'User'}
-                </p>
-              </div>
-            ))}
 
-            {Object.keys(stories).length === 0 && (
-              <div className="flex items-center justify-center py-4 text-gray-500">
-                <p className="text-sm">No stories yet. Be the first to share!</p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+                  <div className="mt-4 grid gap-2">
+                    <button
+                      onClick={() => navigate('/users')}
+                      className="w-full flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm font-semibold text-zinc-100 transition-colors"
+                    >
+                      <Users className="h-5 w-5 text-amber-200" />
+                      Discover musicians
+                    </button>
+                    <button
+                      onClick={() => navigate('/courses')}
+                      className="w-full flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm font-semibold text-zinc-100 transition-colors"
+                    >
+                      <BookOpen className="h-5 w-5 text-amber-200" />
+                      Browse courses
+                    </button>
+                    <button
+                      onClick={() => navigate('/audio-rooms')}
+                      className="w-full flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm font-semibold text-zinc-100 transition-colors"
+                    >
+                      <Mic className="h-5 w-5 text-amber-200" />
+                      Join audio rooms
+                    </button>
+                    <button
+                      onClick={() => navigate('/original-home')}
+                      className="w-full flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-3 text-sm font-semibold text-zinc-100 transition-colors"
+                    >
+                      <Home className="h-5 w-5 text-amber-200" />
+                      Virtual instruments
+                    </button>
+                  </div>
+                </div>
 
-      {/* Bottom Navigation */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t z-20 sm:hidden">
-        <div className="flex justify-around py-2">
-          <button
-            onClick={() => navigate('/home')}
-            className="flex flex-col items-center p-2 text-purple-600"
-          >
-            <Home className="w-6 h-6" />
-            <span className="text-xs mt-1">Home</span>
-          </button>
-          <button
-            onClick={() => navigate('/users')}
-            className="flex flex-col items-center p-2 text-gray-600 hover:text-purple-600"
-          >
-            <Users className="w-6 h-6" />
-            <span className="text-xs mt-1">People</span>
-          </button>
-          <button
-            onClick={() => navigate('/courses')}
-            className="flex flex-col items-center p-2 text-gray-600 hover:text-purple-600"
-          >
-            <BookOpen className="w-6 h-6" />
-            <span className="text-xs mt-1">Courses</span>
-          </button>
-          <button
-            onClick={() => navigate('/audio-rooms')}
-            className="flex flex-col items-center p-2 text-gray-600 hover:text-purple-600"
-          >
-            <Mic className="w-6 h-6" />
-            <span className="text-xs mt-1">Rooms</span>
-          </button>
-          <button
-            onClick={() => navigate('/messages')}
-            className="flex flex-col items-center p-2 text-gray-600 hover:text-purple-600"
-          >
-            <Mail className="w-6 h-6" />
-            <span className="text-xs mt-1">Messages</span>
-          </button>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Left Sidebar - Quick Actions */}
-        <div className="lg:col-span-1">
-          <div className="bg-white/70 backdrop-blur-md rounded-2xl shadow-lg p-6 mb-6">
-            <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
-              <Music className="w-6 h-6 mr-2" />
-              Quick Access
-            </h2>
-            <div className="space-y-3">
-              <button
-                onClick={() => navigate('/users')}
-                className="w-full bg-blue-500 hover:bg-blue-600 text-white px-4 py-3 rounded-lg flex items-center gap-3 transition-colors"
-              >
-                <Users className="w-5 h-5" />
-                Discover Musicians
-              </button>
-              <button
-                onClick={() => navigate('/courses')}
-                className="w-full bg-orange-500 hover:bg-orange-600 text-white px-4 py-3 rounded-lg flex items-center gap-3 transition-colors"
-              >
-                <BookOpen className="w-5 h-5" />
-                Browse Courses
-              </button>
-              <button
-                onClick={() => navigate('/audio-rooms')}
-                className="w-full bg-green-500 hover:bg-green-600 text-white px-4 py-3 rounded-lg flex items-center gap-3 transition-colors"
-              >
-                <Mic className="w-5 h-5" />
-                Join Audio Rooms
-              </button>
-              <button
-                onClick={() => navigate('/original-home')}
-                className="w-full bg-purple-500 hover:bg-purple-600 text-white px-4 py-3 rounded-lg flex items-center gap-3 transition-colors"
-              >
-                <Music className="w-5 h-5" />
-                Practice Instruments
-              </button>
-              <button
-                onClick={() => navigate('/messages')}
-                className="w-full bg-pink-500 hover:bg-pink-600 text-white px-4 py-3 rounded-lg flex items-center gap-3 transition-colors"
-              >
-                <Mail className="w-5 h-5" />
-                Messages
-              </button>
-            </div>
-          </div>
-
-          {/* Virtual Instruments Preview */}
-          <div className="bg-white/70 backdrop-blur-md rounded-2xl shadow-lg p-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4">Practice Online</h3>
-            <div className="grid grid-cols-2 gap-3">
-              {instruments.slice(0, 4).map((instrument) => (
-                <button
-                  key={instrument.name}
-                  onClick={() => window.open(instrument.virtualLink, '_blank')}
-                  className="bg-gradient-to-r from-purple-100 to-pink-100 hover:from-purple-200 hover:to-pink-200 p-3 rounded-lg transition-all transform hover:scale-105 text-center"
-                >
-                  <img
-                    src={instrument.image}
-                    alt={instrument.name}
-                    className="w-12 h-12 mx-auto mb-2 object-contain"
-                  />
-                  <p className="text-xs font-medium capitalize text-gray-700">{instrument.name}</p>
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => navigate('/original-home')}
-              className="w-full mt-4 text-purple-600 hover:text-purple-700 text-sm font-medium"
-            >
-              View All Instruments →
-            </button>
-          </div>
-        </div>
-
-        {/* Main Content - Social Feed */}
-        <div className="lg:col-span-2">
-          <div className="space-y-6">
-            {feed.length === 0 ? (
-              <div className="bg-white/70 backdrop-blur-md rounded-2xl shadow-lg p-8 text-center">
-                <Music className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                <h3 className="text-xl font-semibold text-gray-700 mb-2">
-                  {activeTab === 'following' ? 'No posts from people you follow' : 'Welcome to Music Universe!'}
-                </h3>
-                <p className="text-gray-500 mb-6">
-                  {activeTab === 'following' 
-                    ? 'Start following other musicians to see their posts here!' 
-                    : 'Be the first to share something with the community!'}
-                </p>
-                <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-amber-400/15 via-pink-500/10 to-indigo-500/10 backdrop-blur-2xl shadow-xl shadow-black/40 p-5">
+                  <p className="text-sm font-semibold text-zinc-100">Create something</p>
+                  <p className="mt-1 text-xs text-zinc-400">Share a quick practice update.</p>
                   <button
-                    onClick={() => activeTab === 'following' ? navigate('/users') : setShowCreatePost(true)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg"
+                    type="button"
+                    onClick={() => setShowCreatePost(true)}
+                    className="mt-4 w-full rounded-2xl bg-gradient-to-r from-amber-400 via-pink-400 to-indigo-400 text-zinc-950 px-4 py-3 text-sm font-semibold hover:brightness-110 transition-colors"
                   >
-                    {activeTab === 'following' ? 'Find Musicians' : 'Create First Post'}
-                  </button>
-                  <button
-                    onClick={() => activeTab === 'following' ? setShowCreatePost(true) : navigate('/users')}
-                    className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg"
-                  >
-                    {activeTab === 'following' ? 'Share Your First Post' : 'Find Musicians'}
+                    Create post
                   </button>
                 </div>
               </div>
-            ) : (
-              feed.map((post) => (
-                <div key={post.id} className="bg-white/70 backdrop-blur-md rounded-2xl shadow-lg hover:shadow-xl transition-all">
-                  {/* Post Header */}
-                  <div className="p-6 pb-3">
-                    <div 
-                      className="flex items-center cursor-pointer group"
-                      onClick={() => navigate(`/user-profile/${post.userId}`)}
+            </aside>
+
+            {/* Center Column */}
+            <section className="lg:col-span-6">
+              {activeTab !== 'explore' && (
+                <div className="mb-6 rounded-3xl overflow-hidden border border-white/10 bg-zinc-900/40 backdrop-blur-2xl shadow-xl shadow-black/30">
+                  <StoriesBar
+                    stories={stories}
+                    onOpenStory={openStoryViewer}
+                    onCreateStory={() => setShowCreateStory(true)}
+                  />
+                </div>
+              )}
+
+              {loading ? (
+                <div className="space-y-4">
+                  {[0, 1, 2].map((i) => (
+                    <div
+                      key={i}
+                      className="bg-zinc-900/60 backdrop-blur-2xl rounded-3xl border border-white/10 shadow-2xl shadow-black/40 overflow-hidden"
                     >
-                      {post.userInfo?.profilePic ? (
-                        <img 
-                          src={post.userInfo.profilePic} 
-                          alt={post.userInfo.displayName}
-                          className="w-12 h-12 rounded-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-12 h-12 rounded-full bg-purple-200 flex items-center justify-center">
-                          <User className="w-6 h-6 text-purple-600" />
+                      <div className="p-5 flex items-center gap-4">
+                        <div className="h-11 w-11 rounded-2xl bg-white/10 animate-pulse" />
+                        <div className="flex-1 min-w-0">
+                          <div className="h-3.5 w-40 max-w-[60%] rounded bg-white/10 animate-pulse" />
+                          <div className="mt-2 h-3 w-24 rounded bg-white/10 animate-pulse" />
                         </div>
-                      )}
-                      <div className="ml-4">
-                        <h4 className="font-semibold text-gray-800 group-hover:text-purple-600 transition-colors">
-                          {post.userName}
-                        </h4>
-                        <p className="text-sm text-gray-500">
-                          {post.timestamp?.toDate ? post.timestamp.toDate().toLocaleDateString() : 'Recently'}
+                      </div>
+                      <div className="px-5 pb-5 space-y-2">
+                        <div className="h-3 w-full rounded bg-white/10 animate-pulse" />
+                        <div className="h-3 w-11/12 rounded bg-white/10 animate-pulse" />
+                        <div className="h-3 w-9/12 rounded bg-white/10 animate-pulse" />
+                      </div>
+                      <div className="h-px bg-white/10" />
+                      <div className="p-4 flex items-center gap-3">
+                        <div className="h-9 w-20 rounded-2xl bg-white/10 animate-pulse" />
+                        <div className="h-9 w-20 rounded-2xl bg-white/10 animate-pulse" />
+                        <div className="h-9 w-20 rounded-2xl bg-white/10 animate-pulse" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : feed.length === 0 ? (
+                <div className="bg-zinc-900/70 backdrop-blur-2xl rounded-3xl shadow-2xl shadow-black/50 border border-white/10 p-8 sm:p-10 text-center">
+                  <div className="w-16 h-16 sm:w-20 sm:h-20 bg-gradient-to-br from-amber-400 via-pink-500 to-indigo-500 rounded-3xl flex items-center justify-center mx-auto mb-5 shadow-lg shadow-amber-400/40">
+                    <Music className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
+                  </div>
+                  <h3 className="text-xl sm:text-2xl font-semibold text-zinc-50 mb-2">
+                    {activeTab === 'following' ? 'No Posts Yet' : 'No Posts Found'}
+                  </h3>
+                  <p className="text-sm text-zinc-400 mb-6 max-w-md mx-auto">
+                    {activeTab === 'following'
+                      ? 'Follow other musicians to see their posts here!'
+                      : 'Be the first to share something amazing!'}
+                  </p>
+                  <button
+                    onClick={() => setShowCreatePost(true)}
+                    className="inline-flex items-center justify-center px-6 sm:px-8 py-3 sm:py-3.5 bg-gradient-to-r from-amber-400 via-pink-400 to-indigo-400 text-zinc-950 rounded-2xl text-sm font-semibold shadow-lg shadow-amber-400/30 hover:brightness-110 transition-transform hover:-translate-y-0.5"
+                  >
+                    Create Your First Post
+                  </button>
+                </div>
+              ) : activeTab === 'explore' ? (
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-1.5 sm:gap-2">
+                  {feed.filter(post => post.imageUrl).map((post, index) => (
+                    <div
+                      key={post.id}
+                      className="relative group cursor-pointer overflow-hidden aspect-square bg-zinc-900 rounded-xl"
+                      onClick={() => openPostModal(post, index, feed.filter(p => p.imageUrl))}
+                    >
+                      <img
+                        src={post.imageUrl}
+                        alt="Post"
+                        className="w-full h-full object-cover group-hover:brightness-75 transition-all duration-300"
+                      />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+                        <div className="text-white flex items-center gap-6 text-base font-semibold">
+                          <div className="flex items-center gap-2">
+                            <Heart className="w-6 h-6 fill-white" />
+                            <span>{post.likes?.length || 0}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <MessageCircle className="w-6 h-6 fill-white" />
+                            <span>{post.comments?.length || 0}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-6 sm:space-y-8">
+                  {feed.map((post) => (
+                    <div
+                      key={post.id}
+                      className="bg-zinc-900/70 backdrop-blur-2xl rounded-3xl shadow-2xl shadow-black/50 border border-white/10 overflow-hidden hover:border-amber-300/40 transition-colors duration-300"
+                    >
+                  {/* Post Header */}
+                  <div className="px-5 pt-5 pb-3 flex items-center justify-between">
+                    <div className="flex items-center gap-4 cursor-pointer" onClick={() => navigate(`/user-profile/${post.userId}`)}>
+                      <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-amber-400 via-pink-500 to-indigo-500 p-[2px]">
+                        <div className="w-full h-full bg-zinc-900 rounded-2xl overflow-hidden">
+                          {post.userProfilePic ? (
+                            <img src={post.userProfilePic} alt={post.userName} className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center bg-zinc-800">
+                              <User className="w-6 h-6 text-zinc-400" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-zinc-50">{post.userName}</h3>
+                        <p className="text-xs text-zinc-500">
+                          {post.timestamp?.toDate().toLocaleDateString('en-US', {
+                            month: 'long',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
                         </p>
                       </div>
                     </div>
                   </div>
 
                   {/* Post Content */}
-                  <div className="px-6 pb-4">
-                    <p className="text-gray-800 whitespace-pre-wrap leading-relaxed">{post.content}</p>
+                  <div className="px-5 pb-3">
+                    <p className="text-zinc-100 text-base leading-relaxed whitespace-pre-wrap">{post.content}</p>
                   </div>
 
-                  {/* Post Media */}
-                  {post.mediaUrl && (
-                    <div className="px-6 pb-4">
-                      <img 
-                        src={post.mediaUrl} 
-                        alt="Post media"
-                        className="rounded-xl max-h-96 w-full object-cover"
+                  {/* Post Image */}
+                  {post.imageUrl && (
+                    <div className="relative w-full aspect-video bg-zinc-900">
+                      <img
+                        src={post.imageUrl}
+                        alt="Post content"
+                        className="w-full h-full object-contain"
+                        loading="lazy"
                       />
                     </div>
                   )}
 
                   {/* Post Actions */}
-                  <div className="px-6 py-4 border-t border-gray-200 flex justify-around">
-                    <button className="flex items-center gap-2 text-gray-600 hover:text-red-500 transition-colors py-2 px-4 rounded-lg hover:bg-red-50">
-                      <Heart className="w-5 h-5" />
-                      <span className="text-sm font-medium">Like</span>
-                    </button>
-                    <button className="flex items-center gap-2 text-gray-600 hover:text-blue-500 transition-colors py-2 px-4 rounded-lg hover:bg-blue-50">
-                      <MessageCircle className="w-5 h-5" />
-                      <span className="text-sm font-medium">Comment</span>
-                    </button>
-                    <button className="flex items-center gap-2 text-gray-600 hover:text-green-500 transition-colors py-2 px-4 rounded-lg hover:bg-green-50">
-                      <Share2 className="w-5 h-5" />
-                      <span className="text-sm font-medium">Share</span>
-                    </button>
+                  <div className="px-5 py-4 flex items-center justify-between border-t border-white/10">
+                    <div className="flex items-center gap-6">
+                      <button
+                        onClick={() => handleLikePost(post.id)}
+                        className="flex items-center gap-2 group"
+                      >
+                        <div className={`p-2 rounded-full transition-colors ${post.likes?.includes(auth.currentUser?.uid) ? 'bg-white/5' : 'group-hover:bg-white/5'}`}>
+                          <Heart className={`w-6 h-6 transition-colors ${post.likes?.includes(auth.currentUser?.uid) ? 'fill-pink-400 text-pink-300' : 'text-zinc-300 group-hover:text-pink-300'}`} />
+                        </div>
+                        <span className={`font-semibold ${post.likes?.includes(auth.currentUser?.uid) ? 'text-pink-200' : 'text-zinc-300'}`}>
+                          {post.likes?.length || 0}
+                        </span>
+                      </button>
+
+                      <button
+                        onClick={() => openCommentModal(post)}
+                        className="flex items-center gap-2 group"
+                      >
+                        <div className="p-2 rounded-full group-hover:bg-white/5 transition-colors">
+                          <MessageCircle className="w-6 h-6 text-zinc-300 group-hover:text-amber-200" />
+                        </div>
+                        <span className="font-semibold text-zinc-300 group-hover:text-amber-200">
+                          {post.comments?.length || 0}
+                        </span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const postLink = `${window.location.origin}/post/${post.id}`;
+                          navigator.clipboard.writeText(postLink).then(() => {
+                            alert('Link copied!');
+                          });
+                        }}
+                        className="flex items-center gap-2 group"
+                      >
+                        <div className="p-2 rounded-full group-hover:bg-white/5 transition-colors">
+                          <Share2 className="w-6 h-6 text-zinc-300 group-hover:text-indigo-200" />
+                        </div>
+                      </button>
+                    </div>
                   </div>
                 </div>
-              ))
-            )}
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {/* Right Sidebar (desktop) */}
+            <aside className="hidden lg:block lg:col-span-3">
+              <div className="sticky top-[92px] space-y-4">
+                <div className="rounded-3xl border border-white/10 bg-zinc-900/60 backdrop-blur-2xl shadow-xl shadow-black/40 p-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-zinc-100">Trending</p>
+                      <p className="text-xs text-zinc-400">Hashtags right now</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowTrending(true)}
+                      className="text-xs font-semibold text-amber-200 hover:text-amber-100"
+                    >
+                      View all
+                    </button>
+                  </div>
+
+                  <div className="mt-4 space-y-2">
+                    {(trendingHashtags || []).slice(0, 6).map((item) => (
+                      <div
+                        key={item.tag}
+                        className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 hover:bg-white/10 transition-colors"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-semibold text-zinc-100">{item.tag}</span>
+                          <span className="text-xs text-zinc-400">{item.count}</span>
+                        </div>
+                        <div className="mt-2 h-1 w-full rounded-full bg-white/10 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-amber-300 via-pink-300 to-indigo-300"
+                            style={{ width: `${Math.min(100, (item.count / Math.max(1, (trendingHashtags?.[0]?.count || item.count))) * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+
+                    {(trendingHashtags || []).length === 0 && (
+                      <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-6 text-center">
+                        <p className="text-sm text-zinc-400">No trends yet.</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </aside>
           </div>
-          
+
           {/* Bottom padding for mobile navigation */}
           <div className="pb-20 sm:pb-0"></div>
         </div>
 
-        {/* Right Sidebar - Trending & Suggestions */}
-        <div className="lg:col-span-1">
-          <div className="bg-white/70 backdrop-blur-md rounded-2xl shadow-lg p-6 mb-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4">🔥 Trending</h3>
-            <div className="space-y-3">
-              <div className="p-3 bg-gradient-to-r from-purple-50 to-pink-50 rounded-lg">
-                <p className="text-sm font-medium text-gray-800">#GuitarTips</p>
-                <p className="text-xs text-gray-600">152 posts today</p>
-              </div>
-              <div className="p-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg">
-                <p className="text-sm font-medium text-gray-800">#PianoChallenge</p>
-                <p className="text-xs text-gray-600">89 posts today</p>
-              </div>
-              <div className="p-3 bg-gradient-to-r from-green-50 to-teal-50 rounded-lg">
-                <p className="text-sm font-medium text-gray-800">#VocalTraining</p>
-                <p className="text-xs text-gray-600">64 posts today</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white/70 backdrop-blur-md rounded-2xl shadow-lg p-6">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4">💡 Quick Tips</h3>
-            <div className="space-y-4">
-              <div className="p-3 bg-yellow-50 rounded-lg border-l-4 border-yellow-400">
-                <p className="text-sm text-gray-700">
-                  Practice for 15 minutes daily for better results than 2 hours once a week!
-                </p>
-              </div>
-              <div className="p-3 bg-blue-50 rounded-lg border-l-4 border-blue-400">
-                <p className="text-sm text-gray-700">
-                  Record yourself playing to identify areas for improvement.
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Create Post Modal */}
-      {showCreatePost && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-gray-200 flex justify-between items-center">
-              <h2 className="text-xl font-semibold text-gray-800">Share Your Musical Journey</h2>
-              <button
-                onClick={() => {
-                  setShowCreatePost(false);
-                  setPostContent('');
-                  setPostImage(null);
-                }}
-                className="text-gray-500 hover:text-gray-700 p-2 hover:bg-gray-100 rounded-full"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4">
-              <textarea
-                value={postContent}
-                onChange={(e) => setPostContent(e.target.value)}
-                placeholder="What's happening in your musical world? Share a tip, achievement, or question..."
-                className="w-full p-4 border border-gray-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                rows="4"
-              />
-
-              {postImage && (
-                <div className="relative">
-                  <img 
-                    src={URL.createObjectURL(postImage)} 
-                    alt="Preview"
-                    className="rounded-xl max-h-64 w-full object-cover"
-                  />
+        {/* Create Post Modal - Premium */}
+        {
+          showCreatePost && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                {/* Modal Header */}
+                <div className="sticky top-0 bg-white border-b border-indigo-100 px-8 py-6 flex items-center justify-between rounded-t-3xl">
+                  <h2 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">Create Post</h2>
                   <button
-                    onClick={() => setPostImage(null)}
-                    className="absolute top-3 right-3 bg-black bg-opacity-50 text-white rounded-full p-2 hover:bg-opacity-70"
+                    onClick={() => setShowCreatePost(false)}
+                    className="p-2 hover:bg-indigo-50 rounded-2xl transition-colors"
                   >
-                    <X className="w-4 h-4" />
+                    <X className="w-6 h-6 text-gray-600" />
                   </button>
                 </div>
-              )}
 
-              <div className="flex justify-between items-center">
-                <label className="cursor-pointer text-purple-600 hover:text-purple-700 p-2 hover:bg-purple-50 rounded-full">
-                  <Image className="w-6 h-6" />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageSelect}
-                    className="hidden"
+                {/* Modal Content */}
+                <div className="p-8">
+                  <div className="flex items-start gap-4 mb-6">
+                    <div className="w-14 h-14 rounded-2xl overflow-hidden ring-2 ring-indigo-200 flex-shrink-0">
+                      {userProfile?.profilePic ? (
+                        <img
+                          src={userProfile.profilePic}
+                          alt="Your profile"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gradient-to-br from-indigo-400 to-pink-400 flex items-center justify-center">
+                          <User className="w-7 h-7 text-white" />
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <p className="font-bold text-gray-900 text-lg">{userProfile?.displayName}</p>
+                      <p className="text-sm text-indigo-400 font-medium">Sharing with everyone</p>
+                    </div>
+                  </div>
+
+                  <textarea
+                    value={postContent}
+                    onChange={(e) => setPostContent(e.target.value)}
+                    placeholder="Share your musical journey..."
+                    className="w-full px-5 py-4 border-2 border-indigo-100 rounded-2xl focus:outline-none focus:border-indigo-400 resize-none text-base text-gray-800 placeholder-gray-400 min-h-[180px] transition-all"
+                    rows={6}
                   />
-                </label>
 
-                <button
-                  onClick={handleCreatePost}
-                  disabled={(!postContent.trim() && !postImage) || uploadingPost}
-                  className="bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white px-8 py-3 rounded-xl font-semibold transition-colors"
-                >
-                  {uploadingPost ? 'Sharing...' : 'Share Post'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Create Story Modal */}
-      {showCreateStory && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b border-gray-200 flex justify-between items-center">
-              <h2 className="text-xl font-semibold text-gray-800">Share Your Story</h2>
-              <button
-                onClick={() => {
-                  setShowCreateStory(false);
-                  setStoryText('');
-                  setStoryImage(null);
-                }}
-                className="text-gray-500 hover:text-gray-700 p-2 hover:bg-gray-100 rounded-full"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4">
-              <textarea
-                value={storyText}
-                onChange={(e) => setStoryText(e.target.value)}
-                placeholder="What's happening in your musical world? Share a quick update..."
-                className="w-full p-4 border border-gray-200 rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                rows="3"
-              />
-
-              {storyImage && (
-                <div className="relative">
-                  <img 
-                    src={URL.createObjectURL(storyImage)} 
-                    alt="Story preview"
-                    className="rounded-xl max-h-64 w-full object-cover"
-                  />
-                  <button
-                    onClick={() => setStoryImage(null)}
-                    className="absolute top-3 right-3 bg-black bg-opacity-50 text-white rounded-full p-2 hover:bg-opacity-70"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-              )}
-
-              <div className="flex justify-between items-center">
-                <label className="cursor-pointer text-purple-600 hover:text-purple-700 p-2 hover:bg-purple-50 rounded-full">
-                  <Camera className="w-6 h-6" />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleStoryImageSelect}
-                    className="hidden"
-                  />
-                </label>
-
-                <button
-                  onClick={handleCreateStory}
-                  disabled={(!storyText.trim() && !storyImage) || uploadingStory}
-                  className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:from-gray-400 disabled:to-gray-400 text-white px-8 py-3 rounded-xl font-semibold transition-all"
-                >
-                  {uploadingStory ? 'Sharing...' : 'Share Story'}
-                </button>
-              </div>
-
-              <div className="text-center">
-                <p className="text-xs text-gray-500">
-                  🔥 Stories disappear after 24 hours
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Story Viewer */}
-      {showStoryViewer && currentStoryUser && stories[currentStoryUser] && (
-        <div className="fixed inset-0 bg-black z-50 flex items-center justify-center">
-          <div className="relative w-full h-full max-w-md mx-auto bg-black">
-            {/* Story Header */}
-            <div className="absolute top-0 left-0 right-0 z-10 p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  {stories[currentStoryUser].userInfo?.profilePic ? (
-                    <img
-                      src={stories[currentStoryUser].userInfo.profilePic}
-                      alt={stories[currentStoryUser].userInfo.displayName}
-                      className="w-10 h-10 rounded-full object-cover border-2 border-white"
-                    />
-                  ) : (
-                    <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
-                      <User className="w-6 h-6 text-white" />
+                  {postImage && (
+                    <div className="mt-6 relative">
+                      <img
+                        src={URL.createObjectURL(postImage)}
+                        alt="Preview"
+                        className="w-full rounded-2xl object-cover max-h-96 shadow-lg"
+                      />
+                      <button
+                        onClick={() => setPostImage(null)}
+                        className="absolute top-4 right-4 p-2 bg-black/60 hover:bg-black/80 text-white rounded-full transition-all"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
                     </div>
                   )}
+
+                  <div className="mt-6 flex items-center gap-4">
+                    <label className="flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-indigo-50 to-purple-50 hover:from-indigo-100 hover:to-purple-100 text-indigo-600 rounded-2xl cursor-pointer transition-all border border-indigo-200 hover:shadow-md">
+                      <Image className="w-5 h-5" />
+                      <span className="font-semibold">Add Media</span>
+                      <input
+                        type="file"
+                        accept="image/*,video/*"
+                        onChange={(e) => {
+                          const file = e.target.files[0];
+                          setPostImage(file);
+                          // Get video duration if it's a video
+                          if (file && file.type.startsWith('video/')) {
+                            const video = document.createElement('video');
+                            video.preload = 'metadata';
+                            video.onloadedmetadata = () => {
+                              setVideoDuration(Math.floor(video.duration));
+                              // Auto-select media type based on duration
+                              if (video.duration <= 120) {
+                                setPostMediaType('reel');
+                              } else {
+                                setPostMediaType('video');
+                              }
+                            };
+                            video.src = URL.createObjectURL(file);
+                          } else {
+                            setPostMediaType('post');
+                            setVideoDuration(0);
+                          }
+                        }}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+
+                  {/* Media Type Selection */}
+                  <div className="mt-6">
+                    <p className="text-sm font-semibold text-gray-700 mb-3">Content Type:</p>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => setPostMediaType('post')}
+                        className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${postMediaType === 'post'
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}
+                      >
+                        📸 Post
+                      </button>
+                      <button
+                        onClick={() => setPostMediaType('reel')}
+                        disabled={!postImage || !postImage.type.startsWith('video/')}
+                        className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${postMediaType === 'reel'
+                          ? 'bg-gradient-to-r from-pink-500 to-orange-500 text-white'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50'
+                          }`}
+                      >
+                        ✨ Vibe (≤2min)
+                      </button>
+                      <button
+                        onClick={() => setPostMediaType('video')}
+                        disabled={!postImage || !postImage.type.startsWith('video/')}
+                        className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${postMediaType === 'video'
+                          ? 'bg-gradient-to-r from-blue-500 to-cyan-500 text-white'
+                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200 disabled:opacity-50'
+                          }`}
+                      >
+                        🎬 Stream (&gt;2min)
+                      </button>
+                    </div>
+                    {videoDuration > 0 && (
+                      <p className="text-xs text-gray-500 mt-2">
+                        Video duration: {Math.floor(videoDuration / 60)}:{(videoDuration % 60).toString().padStart(2, '0')}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Modal Footer */}
+                <div className="sticky bottom-0 bg-gradient-to-r from-indigo-50 to-purple-50 border-t border-indigo-100 px-8 py-6 rounded-b-3xl">
+                  {/* Media Required Warning */}
+                  {!postImage && (
+                    <div className="mb-4 p-4 bg-amber-50 border-l-4 border-amber-500 rounded-2xl">
+                      <p className="text-sm text-amber-800 font-semibold flex items-center gap-2">
+                        <Image className="w-4 h-4" />
+                        Media is required to create a post
+                      </p>
+                    </div>
+                  )}
+                  <div className="flex justify-end gap-4">
+                    <button
+                      onClick={() => setShowCreatePost(false)}
+                      className="px-8 py-3 text-gray-700 hover:bg-white rounded-2xl font-semibold transition-all border border-gray-200"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleCreatePost}
+                      disabled={uploadingPost || !postImage}
+                      className="px-8 py-3 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-700 hover:via-purple-700 hover:to-pink-700 text-white rounded-2xl font-semibold transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                      {uploadingPost ? (
+                        <>
+                          <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                          Posting...
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-5 h-5" />
+                          Post
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        }
+
+        {/* Create Update Modal - Premium */}
+        {
+          showCreateStory && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                {/* Modal Header */}
+                <div className="sticky top-0 bg-white border-b border-indigo-100 px-8 py-6 flex items-center justify-between rounded-t-3xl">
+                  <h2 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">Create Update</h2>
+                  <button
+                    onClick={() => setShowCreateStory(false)}
+                    className="p-2 hover:bg-indigo-50 rounded-2xl transition-colors"
+                  >
+                    <X className="w-6 h-6 text-gray-600" />
+                  </button>
+                </div>
+
+                {/* Modal Content */}
+                <div className="p-8">
+                  <textarea
+                    value={storyText}
+                    onChange={(e) => setStoryText(e.target.value)}
+                    placeholder="Share a moment from your musical journey..."
+                    className="w-full px-5 py-4 border-2 border-indigo-100 rounded-2xl focus:outline-none focus:border-indigo-400 resize-none text-base text-gray-800 placeholder-gray-400 min-h-[150px] transition-all"
+                    rows={4}
+                  />
+
+                  {storyImages.length > 0 && (
+                    <div className="mt-6 grid grid-cols-2 gap-4">
+                      {storyImages.map((image, index) => (
+                        <div key={index} className="relative">
+                          <img
+                            src={URL.createObjectURL(image)}
+                            alt={`Update preview ${index + 1}`}
+                            className="w-full rounded-2xl object-cover h-48 shadow-lg"
+                          />
+                          <button
+                            onClick={() => setStoryImages(storyImages.filter((_, i) => i !== index))}
+                            className="absolute top-2 right-2 p-2 bg-black/60 hover:bg-black/80 text-white rounded-full transition-all"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="mt-6 flex items-center gap-4">
+                    <label className="flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-indigo-50 to-purple-50 hover:from-indigo-100 hover:to-purple-100 text-indigo-600 rounded-2xl cursor-pointer transition-all border border-indigo-200 hover:shadow-md">
+                      <Camera className="w-5 h-5" />
+                      <span className="font-semibold">Add Images</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        onChange={(e) => setStoryImages([...storyImages, ...Array.from(e.target.files)])}
+                        className="hidden"
+                      />
+                    </label>
+                    {storyImages.length > 0 && (
+                      <p className="text-sm text-indigo-600 font-medium">
+                        {storyImages.length} {storyImages.length === 1 ? 'image' : 'images'} selected
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Modal Footer */}
+                <div className="sticky bottom-0 bg-gradient-to-r from-indigo-50 to-purple-50 border-t border-indigo-100 px-8 py-6 flex justify-end gap-4 rounded-b-3xl">
+                  <button
+                    onClick={() => setShowCreateStory(false)}
+                    className="px-8 py-3 text-gray-700 hover:bg-white rounded-2xl font-semibold transition-all border border-gray-200"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleCreateStory}
+                    disabled={uploadingStory}
+                    className="px-8 py-3 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-700 hover:via-purple-700 hover:to-pink-700 text-white rounded-2xl font-semibold transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {uploadingStory ? (
+                      <>
+                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                        Posting...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-5 h-5" />
+                        Share Update
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )
+        }
+
+        {/* Story Viewer Modal */}
+        {
+          showStoryViewer && currentStoryUser && stories[currentStoryUser] && (
+            <div className="fixed inset-0 bg-black z-50 flex items-center justify-center">
+              <button
+                onClick={closeStoryViewer}
+                className="absolute top-4 right-4 p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors z-10"
+              >
+                <X className="w-6 h-6 text-white" />
+              </button>
+
+              {currentStoryIndex > 0 && (
+                <button
+                  onClick={() => setCurrentStoryIndex(currentStoryIndex - 1)}
+                  className="absolute left-4 p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors z-10"
+                >
+                  <ChevronLeft className="w-6 h-6 text-white" />
+                </button>
+              )}
+
+              {currentStoryIndex < stories[currentStoryUser].stories.length - 1 && (
+                <button
+                  onClick={() => setCurrentStoryIndex(currentStoryIndex + 1)}
+                  className="absolute right-4 p-2 bg-white/20 hover:bg-white/30 rounded-full transition-colors z-10"
+                >
+                  <ChevronRight className="w-6 h-6 text-white" />
+                </button>
+              )}
+
+              <div className="relative w-full max-w-lg h-full max-h-[90vh] flex items-center justify-center">
+                {stories[currentStoryUser].stories[currentStoryIndex].imageUrl ? (
+                  <img
+                    src={stories[currentStoryUser].stories[currentStoryIndex].imageUrl}
+                    alt="Story"
+                    className="max-w-full max-h-full object-contain"
+                  />
+                ) : (
+                  <div className="bg-gradient-to-br from-purple-600 to-pink-600 w-full h-full flex items-center justify-center p-8">
+                    <p className="text-white text-2xl font-bold text-center">
+                      {stories[currentStoryUser].stories[currentStoryIndex].text}
+                    </p>
+                  </div>
+                )}
+
+                {/* Story User Info */}
+                <div className="absolute top-4 left-4 flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full overflow-hidden ring-2 ring-white">
+                    {stories[currentStoryUser].userInfo?.profilePic ? (
+                      <img
+                        src={stories[currentStoryUser].userInfo.profilePic}
+                        alt={stories[currentStoryUser].userInfo.displayName}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gray-600 flex items-center justify-center">
+                        <User className="w-5 h-5 text-white" />
+                      </div>
+                    )}
+                  </div>
                   <div>
-                    <h3 className="text-white font-semibold">
+                    <p className="text-white font-semibold">
                       {stories[currentStoryUser].userInfo?.displayName || 'User'}
-                    </h3>
-                    <p className="text-white/70 text-sm">
-                      {stories[currentStoryUser].stories[currentStoryIndex]?.timestamp?.toDate?.()?.toLocaleDateString() || 'Recently'}
+                    </p>
+                    <p className="text-white/70 text-xs">
+                      {stories[currentStoryUser].stories[currentStoryIndex].timestamp?.toDate().toLocaleDateString()}
                     </p>
                   </div>
                 </div>
-                <button
-                  onClick={closeStoryViewer}
-                  className="text-white hover:text-gray-300 p-2"
-                >
-                  <X className="w-6 h-6" />
-                </button>
-              </div>
-              
-              {/* Progress indicators */}
-              <div className="flex gap-1 mt-4">
-                {stories[currentStoryUser].stories.map((_, index) => (
-                  <div
-                    key={index}
-                    className={`h-1 flex-1 rounded-full ${
-                      index <= currentStoryIndex ? 'bg-white' : 'bg-white/30'
-                    }`}
-                  />
-                ))}
               </div>
             </div>
+          )
+        }
 
-            {/* Story Content */}
-            <div className="relative w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-900 to-pink-900">
-              {stories[currentStoryUser].stories[currentStoryIndex]?.mediaUrl ? (
-                <img
-                  src={stories[currentStoryUser].stories[currentStoryIndex].mediaUrl}
-                  alt="Story"
-                  className="max-w-full max-h-full object-contain"
-                />
-              ) : (
-                <div className="text-center px-8">
-                  <div className="text-2xl mb-4">🎵</div>
-                  <p className="text-white text-lg font-medium leading-relaxed">
-                    {stories[currentStoryUser].stories[currentStoryIndex]?.text}
-                  </p>
+        {/* Comment Modal */}
+        {
+          showCommentModal && currentCommentPost && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                {/* Modal Header */}
+                <div className="sticky top-0 bg-white border-b border-indigo-100 px-8 py-6 flex items-center justify-between rounded-t-3xl">
+                  <h2 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">Comments</h2>
+                  <button
+                    onClick={closeCommentModal}
+                    className="p-2 hover:bg-indigo-50 rounded-2xl transition-colors"
+                  >
+                    <X className="w-6 h-6 text-gray-600" />
+                  </button>
                 </div>
-              )}
-              
-              {/* Navigation Areas */}
-              <button
-                onClick={() => {
-                  if (currentStoryIndex > 0) {
-                    setCurrentStoryIndex(currentStoryIndex - 1);
-                  }
-                }}
-                className="absolute left-0 top-0 w-1/3 h-full bg-transparent"
-                disabled={currentStoryIndex === 0}
-              />
-              
-              <button
-                onClick={() => {
-                  if (currentStoryIndex < stories[currentStoryUser].stories.length - 1) {
-                    setCurrentStoryIndex(currentStoryIndex + 1);
-                  } else {
-                    closeStoryViewer();
-                  }
-                }}
-                className="absolute right-0 top-0 w-2/3 h-full bg-transparent"
-              />
+
+                {/* Comments List */}
+                <div className="p-8 space-y-6 max-h-[400px] overflow-y-auto">
+                  {currentCommentPost.comments && currentCommentPost.comments.length > 0 ? (
+                    currentCommentPost.comments.map((comment, index) => (
+                      <div key={index} className="flex gap-4">
+                        <div className="w-10 h-10 rounded-full overflow-hidden ring-2 ring-indigo-200 flex-shrink-0">
+                          {comment.userProfilePic ? (
+                            <img
+                              src={comment.userProfilePic}
+                              alt={comment.userName}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full bg-gradient-to-br from-indigo-400 to-pink-400 flex items-center justify-center">
+                              <User className="w-5 h-5 text-white" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-grow">
+                          <div className="bg-gray-50 rounded-2xl px-4 py-3">
+                            <p className="font-semibold text-gray-900 text-sm">{comment.userName}</p>
+                            <p className="text-gray-800 text-sm mt-1">{comment.text}</p>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-1 ml-4">
+                            {new Date(comment.timestamp).toLocaleString()}
+                          </p>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-8">
+                      <MessageCircle className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                      <p className="text-gray-500">No comments yet. Be the first to comment!</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Add Comment Section */}
+                <div className="sticky bottom-0 bg-gradient-to-r from-indigo-50 to-purple-50 border-t border-indigo-100 px-8 py-6 rounded-b-3xl">
+                  <div className="flex gap-4">
+                    <div className="w-10 h-10 rounded-full overflow-hidden ring-2 ring-indigo-200 flex-shrink-0">
+                      {userProfile?.profilePic ? (
+                        <img
+                          src={userProfile.profilePic}
+                          alt="Your profile"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-gradient-to-br from-indigo-400 to-pink-400 flex items-center justify-center">
+                          <User className="w-5 h-5 text-white" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-grow flex gap-3">
+                      <input
+                        type="text"
+                        value={commentText}
+                        onChange={(e) => setCommentText(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && handleAddComment()}
+                        placeholder="Write a comment..."
+                        className="flex-grow px-4 py-3 border-2 border-indigo-100 rounded-2xl focus:outline-none focus:border-indigo-400 text-sm"
+                      />
+                      <button
+                        onClick={handleAddComment}
+                        disabled={submittingComment || !commentText.trim()}
+                        className="px-6 py-3 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-700 hover:via-purple-700 hover:to-pink-700 text-white rounded-2xl font-semibold transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      >
+                        {submittingComment ? (
+                          <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                        ) : (
+                          <Send className="w-5 h-5" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-            
-            {/* Navigation Arrows */}
-            {currentStoryIndex > 0 && (
+          )
+        }
+
+        {/* Post Detail Modal (for Explore grid clicks) - Redesigned */}
+        {
+          selectedPostModal && viewerPosts.length > 0 && (
+            <div
+              className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center p-0 sm:p-4"
+              onWheel={(e) => {
+                e.preventDefault();
+                if (e.deltaY > 0 && currentPostIndex < viewerPosts.length - 1) {
+                  setCurrentPostIndex(prev => prev + 1);
+                } else if (e.deltaY < 0 && currentPostIndex > 0) {
+                  setCurrentPostIndex(prev => prev - 1);
+                }
+              }}
+            >
+              {/* Close Button */}
               <button
-                onClick={() => setCurrentStoryIndex(currentStoryIndex - 1)}
-                className="absolute left-4 top-1/2 transform -translate-y-1/2 text-white hover:text-gray-300 p-2 bg-black/20 rounded-full"
+                onClick={closePostModal}
+                className="absolute top-4 right-4 z-10 p-3 bg-white/10 hover:bg-white/20 rounded-full transition-all"
               >
-                <ChevronLeft className="w-6 h-6" />
+                <X className="w-6 h-6 text-white" />
               </button>
-            )}
-            
-            {currentStoryIndex < stories[currentStoryUser].stories.length - 1 && (
-              <button
-                onClick={() => setCurrentStoryIndex(currentStoryIndex + 1)}
-                className="absolute right-4 top-1/2 transform -translate-y-1/2 text-white hover:text-gray-300 p-2 bg-black/20 rounded-full"
-              >
-                <ChevronRight className="w-6 h-6" />
-              </button>
-            )}
+
+              {/* Main Container - Image on Left, Details on Right */}
+              <div className="w-full h-full sm:h-[90vh] bg-white sm:rounded-2xl overflow-hidden shadow-2xl flex flex-col md:flex-row">
+                {/* Left Side - Image */}
+                <div className="flex-1 bg-black flex items-center justify-center relative min-h-[40vh] md:min-h-0">
+                  {viewerPosts[currentPostIndex]?.imageUrl ? (
+                    <img
+                      src={viewerPosts[currentPostIndex].imageUrl}
+                      alt="Post"
+                      className="max-w-full max-h-full object-contain"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <p className="text-gray-500">No image</p>
+                    </div>
+                  )}
+
+                  {/* Navigation Arrows */}
+                  {currentPostIndex > 0 && (
+                    <button
+                      onClick={() => setCurrentPostIndex(prev => prev - 1)}
+                      className="absolute left-4 p-3 bg-black/50 hover:bg-black/70 rounded-full transition-all"
+                    >
+                      <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                      </svg>
+                    </button>
+                  )}
+                  {currentPostIndex < viewerPosts.length - 1 && (
+                    <button
+                      onClick={() => setCurrentPostIndex(prev => prev + 1)}
+                      className="absolute right-4 p-3 bg-black/50 hover:bg-black/70 rounded-full transition-all"
+                    >
+                      <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                  )}
+
+                  {/* Post Counter */}
+                  <div className="absolute top-4 left-4 bg-black/50 backdrop-blur-sm px-3 py-1 rounded-full">
+                    <p className="text-white text-sm font-semibold">{currentPostIndex + 1} / {viewerPosts.length}</p>
+                  </div>
+                </div>
+
+                {/* Right Side - Post Details */}
+                <div className="w-full md:w-[400px] flex flex-col bg-white max-h-[60vh] md:max-h-full">
+                  {/* Header with User Info */}
+                  <div className="p-4 border-b border-gray-200">
+                    <div
+                      className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 rounded-xl p-2 -m-2 transition-all"
+                      onClick={() => {
+                        closePostModal();
+                        navigate(`/user-profile/${viewerPosts[currentPostIndex].userId}`);
+                      }}
+                    >
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center overflow-hidden">
+                        {viewerPosts[currentPostIndex].userProfilePic ? (
+                          <img src={viewerPosts[currentPostIndex].userProfilePic} alt="Profile" className="w-full h-full object-cover" />
+                        ) : (
+                          <User className="w-6 h-6 text-white" />
+                        )}
+                      </div>
+                      <div>
+                        <p className="font-bold text-gray-900">{viewerPosts[currentPostIndex].userName}</p>
+                        <p className="text-xs text-gray-500">
+                          {viewerPosts[currentPostIndex]?.timestamp?.toDate().toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric'
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Caption */}
+                  {viewerPosts[currentPostIndex]?.content && (
+                    <div className="p-4 border-b border-gray-200">
+                      <p className="text-gray-800 text-sm leading-relaxed whitespace-pre-wrap">
+                        {viewerPosts[currentPostIndex].content}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Comments Section - Scrollable */}
+                  <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                    {viewerPosts[currentPostIndex]?.comments && viewerPosts[currentPostIndex].comments.length > 0 ? (
+                      viewerPosts[currentPostIndex].comments.map((comment, idx) => (
+                        <div key={idx} className="flex gap-3">
+                          <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 bg-gradient-to-br from-indigo-400 to-pink-400">
+                            {comment.userProfilePic ? (
+                              <img src={comment.userProfilePic} alt={comment.userName} className="w-full h-full object-cover" />
+                            ) : (
+                              <User className="w-4 h-4 text-white m-auto mt-2" />
+                            )}
+                          </div>
+                          <div className="flex-1">
+                            <div className="bg-gray-100 rounded-2xl px-3 py-2">
+                              <p className="font-semibold text-sm text-gray-900">{comment.userName}</p>
+                              <p className="text-sm text-gray-800">{comment.text}</p>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1 ml-3">
+                              {new Date(comment.timestamp).toLocaleString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </p>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="text-center py-8">
+                        <MessageCircle className="w-12 h-12 text-gray-300 mx-auto mb-2" />
+                        <p className="text-gray-500 text-sm">No comments yet</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="p-4 border-t border-gray-200 bg-gray-50">
+                    <div className="flex items-center justify-around mb-3">
+                      <button
+                        onClick={() => {
+                          loadLikesList(viewerPosts[currentPostIndex]);
+                          setShowLikesModal(true);
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 hover:bg-gray-200 rounded-xl transition-all group"
+                      >
+                        <Heart className={`w-5 h-5 ${viewerPosts[currentPostIndex]?.likes?.includes(auth.currentUser?.uid)
+                          ? 'fill-pink-500 text-pink-500'
+                          : 'text-gray-600 group-hover:text-pink-500'
+                          }`} />
+                        <span className="text-sm font-semibold text-gray-700">
+                          {viewerPosts[currentPostIndex]?.likes?.length || 0}
+                        </span>
+                      </button>
+                      <button className="flex items-center gap-2 px-4 py-2 hover:bg-gray-200 rounded-xl transition-all">
+                        <MessageCircle className="w-5 h-5 text-gray-600" />
+                        <span className="text-sm font-semibold text-gray-700">
+                          {viewerPosts[currentPostIndex]?.comments?.length || 0}
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          const postLink = `${window.location.origin}/post/${viewerPosts[currentPostIndex].id}`;
+                          navigator.clipboard.writeText(postLink).then(() => {
+                            alert('Post link copied to clipboard!');
+                          }).catch(() => {
+                            alert('Failed to copy link');
+                          });
+                        }}
+                        className="flex items-center gap-2 px-4 py-2 hover:bg-gray-200 rounded-xl transition-all"
+                      >
+                        <Share2 className="w-5 h-5 text-gray-600" />
+                      </button>
+                    </div>
+                    <p className="text-xs text-center text-gray-500">Scroll to view more posts</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        }
+
+        {/* Likes Modal */}
+        {
+          showLikesModal && (
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-hidden">
+                {/* Modal Header */}
+                <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+                  <h2 className="text-xl font-bold text-gray-900">Likes</h2>
+                  <button
+                    onClick={() => setShowLikesModal(false)}
+                    className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                  >
+                    <X className="w-5 h-5 text-gray-600" />
+                  </button>
+                </div>
+
+                {/* Likes List */}
+                <div className="p-4 overflow-y-auto max-h-[calc(80vh-80px)]">
+                  {likesList.length > 0 ? (
+                    <div className="space-y-3">
+                      {likesList.map((user) => (
+                        <div
+                          key={user.id}
+                          onClick={() => {
+                            setShowLikesModal(false);
+                            closePostModal();
+                            navigate(`/user-profile/${user.id}`);
+                          }}
+                          className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-2xl cursor-pointer transition-all"
+                        >
+                          <div className="w-12 h-12 rounded-full overflow-hidden bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center">
+                            {user.profilePic ? (
+                              <img src={user.profilePic} alt={user.displayName} className="w-full h-full object-cover" />
+                            ) : (
+                              <User className="w-6 h-6 text-white" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="font-semibold text-gray-900">{user.displayName}</p>
+                            {user.bio && (
+                              <p className="text-sm text-gray-500 line-clamp-1">{user.bio}</p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-12">
+                      <Heart className="w-12 h-12 text-gray-300 mx-auto mb-2" />
+                      <p className="text-gray-500">No likes yet</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        }
+
+        {/* Bottom Navigation - Mobile Only */}
+        <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-2xl border-t border-indigo-100 z-50 sm:hidden shadow-lg shadow-indigo-100/50">
+          <div className="flex justify-around py-3 px-2">
+            <button
+              onClick={() => navigate('/home')}
+              className="flex flex-col items-center gap-1 p-2 text-indigo-600"
+            >
+              <div className="relative">
+                <Home className="w-6 h-6" />
+                <div className="absolute -bottom-1 left-0 right-0 h-1 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 rounded-full"></div>
+              </div>
+              <span className="text-xs font-semibold">Home</span>
+            </button>
+            <button
+              onClick={() => navigate('/users')}
+              className="flex flex-col items-center gap-1 p-2 text-gray-500 hover:text-indigo-600 transition-colors"
+            >
+              <Users className="w-6 h-6" />
+              <span className="text-xs font-medium">People</span>
+            </button>
+            <button
+              onClick={() => navigate('/courses')}
+              className="flex flex-col items-center gap-1 p-2 text-gray-500 hover:text-indigo-600 transition-colors"
+            >
+              <BookOpen className="w-6 h-6" />
+              <span className="text-xs font-medium">Courses</span>
+            </button>
+            <button
+              onClick={() => navigate('/original-home')}
+              className="flex flex-col items-center gap-1 p-2 text-gray-500 hover:text-indigo-600 transition-colors"
+            >
+              <Mic className="w-6 h-6" />
+              <span className="text-xs font-medium">Play</span>
+            </button>
           </div>
         </div>
-      )}
-    </div>
+      </div >
+    </>
   );
 };
 

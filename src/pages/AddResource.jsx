@@ -1,7 +1,6 @@
 // src/pages/AddResource.jsx
 import React, { useState } from "react";
-import { storage, db } from "../firebase";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db } from "../firebase";
 import { collection, addDoc } from "firebase/firestore";
 
 const instruments = [
@@ -40,14 +39,21 @@ export default function AddResource() {
     try {
       let finalLink = link;
 
-      // If a file was chosen, upload it and get its URL
+      // If a file was chosen, convert to base64
       if (file) {
-        const storageRef = ref(
-          storage,
-          `resources/${instrument}/${level}/${Date.now()}_${file.name}`
-        );
-        await uploadBytes(storageRef, file);
-        finalLink = await getDownloadURL(storageRef);
+        // Check file size (max 500KB)
+        if (file.size > 500000) {
+          setMessage("File too large. Please select a file smaller than 500KB or use a link instead.");
+          setUploading(false);
+          return;
+        }
+
+        finalLink = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
       }
 
       // Add document to Firestore
@@ -76,7 +82,7 @@ export default function AddResource() {
   };
 
   return (
-    <div className="p-6 max-w-lg mx-auto bg-white shadow rounded">
+    <div className="p-6 w-full bg-white shadow rounded">
       <h2 className="text-2xl font-bold mb-4">Add New Resource</h2>
       {message && (
         <p className={`mb-4 ${message.includes("success") ? "text-green-600" : "text-red-600"}`}>

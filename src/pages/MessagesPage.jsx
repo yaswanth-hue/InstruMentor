@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Helmet } from 'react-helmet-async';
 import { auth, db, getMessages, sendMessageRequest, acceptMessageRequest, rejectMessageRequest, getUserProfile, getPosts, getStoriesGroupedByUser } from '../firebase';
 import { collection, onSnapshot, query, where, orderBy } from 'firebase/firestore';
 import { 
@@ -240,18 +241,30 @@ const MessagesPage = () => {
   });
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <>
+      <Helmet>
+        <title>Messages | InstruMentor - Chat with Musicians</title>
+        <meta name="description" content="Connect and chat with musicians on InstruMentor. Send messages, share ideas, and collaborate with fellow artists in your network." />
+        <meta property="og:title" content="Messages | InstruMentor - Chat with Musicians" />
+        <meta property="og:description" content="Connect and chat with musicians on InstruMentor. Send messages, share ideas, and collaborate with fellow artists." />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content={typeof window !== 'undefined' ? window.location.href : ''} />
+        <meta name="twitter:card" content="summary" />
+        <meta name="twitter:title" content="Messages | InstruMentor - Chat with Musicians" />
+        <meta name="twitter:description" content="Connect and chat with musicians on InstruMentor. Send messages, share ideas, and collaborate." />
+      </Helmet>
+      <div className="min-h-screen bg-gray-50" style={{width: '100%', maxWidth: 'none'}}>
       {/* Header */}
       <div className="bg-white shadow-sm">
-        <div className="max-w-6xl mx-auto px-4 py-4">
+        <div className="w-full px-3 sm:px-4 py-3 sm:py-4" style={{width: '100%', maxWidth: 'none'}}>
           <div className="flex justify-between items-center">
-            <h1 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-              <Mail className="w-6 h-6 text-purple-600" />
-              Messages
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-800 flex items-center gap-2">
+              <Mail className="w-5 h-5 sm:w-6 sm:h-6 text-purple-600" />
+              <span className="hidden sm:inline">Messages</span>
             </h1>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3">
               {/* View Mode Controls */}
-              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+              <div className="hidden md:flex items-center gap-1 bg-gray-100 rounded-lg p-1">
                 <button
                   onClick={toggleViewMode}
                   className={`p-2 rounded-md transition-all flex items-center gap-2 text-sm font-medium ${
@@ -312,14 +325,12 @@ const MessagesPage = () => {
       </div>
 
       {/* Main Content */}
-      <div className={`mx-auto px-4 py-6 ${
-        viewMode === 'messages-only' ? 'max-w-6xl' : 'max-w-7xl'
-      }`}>
-        <div className={`grid gap-6 h-[600px] ${
-          viewMode === 'messages-only' 
+      <div className="w-full px-3 sm:px-4 py-4 sm:py-6">
+        <div className={`grid gap-3 sm:gap-6 h-[calc(100vh-12rem)] sm:h-[600px] ${
+          viewMode === 'messages-only'
             ? 'grid-cols-1 md:grid-cols-3'
-            : viewMode === 'split' && showFeedSidebar 
-              ? 'grid-cols-1 lg:grid-cols-5' 
+            : viewMode === 'split' && showFeedSidebar
+              ? 'grid-cols-1 lg:grid-cols-5'
               : 'grid-cols-1 md:grid-cols-3'
         }`}>
           {/* Conversations List */}
@@ -700,8 +711,8 @@ const MessagesPage = () => {
       
       {/* Call Interface */}
       {isInCall && (
-        <div className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full mx-4">
+        <div className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full">
             {/* Call Header */}
             <div className="p-6 text-center">
               {callPeer?.profilePic ? (
@@ -787,6 +798,7 @@ const MessagesPage = () => {
         </div>
       )}
     </div>
+    </>
   );
 };
 

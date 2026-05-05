@@ -5,6 +5,23 @@
     <link rel="icon" type="image/svg+xml" href="/src/assets/logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>InstruMentor</title>
+
+    <!-- Resource hints for faster loading -->
+    <link rel="preconnect" href="https://firebasestorage.googleapis.com" crossorigin />
+    <link rel="dns-prefetch" href="https://firebasestorage.googleapis.com" />
+    <link rel="preconnect" href="https://identitytoolkit.googleapis.com" crossorigin />
+    <link rel="dns-prefetch" href="https://identitytoolkit.googleapis.com" />
+
+    <!-- Inline critical loading styles for instant feedback -->
+    <style>
+      /* Critical CSS - shows immediately */
+      #root {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

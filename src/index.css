@@ -1,1 +1,165 @@
 @import "tailwindcss";
+
+/* Premium profile transitions (View Transitions API) */
+::view-transition-old(profile-avatar),
+::view-transition-new(profile-avatar) {
+  animation-duration: 550ms;
+  animation-timing-function: cubic-bezier(.4,0,.2,1);
+}
+
+::view-transition-group(root) {
+  animation: blurTransition 500ms ease;
+}
+
+@keyframes blurTransition {
+  0% { filter: blur(12px); opacity: 0.8; }
+  100% { filter: blur(0); opacity: 1; }
+}
+
+/* GPU-friendly hints (scoped) */
+.profile-content {
+  will-change: transform;
+  overscroll-behavior: contain;
+}
+
+.profile-avatar {
+  will-change: transform;
+}
+
+.post-card img {
+  transition: transform 0.4s ease;
+  will-change: transform;
+}
+
+.post-card:hover img {
+  transform: scale(1.06);
+}
+
+/* Custom Animations for Audio Rooms */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-5px);
+  }
+  75% {
+    transform: translateX(5px);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes blob {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  25% {
+    transform: translate(20px, -20px) scale(1.1);
+  }
+  50% {
+    transform: translate(-20px, 20px) scale(0.9);
+  }
+  75% {
+    transform: translate(20px, 20px) scale(1.05);
+  }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.animate-slideUp {
+  animation: slideUp 0.4s ease-out;
+}
+
+.animate-slideDown {
+  animation: slideDown 0.3s ease-out;
+}
+
+.animate-shake {
+  animation: shake 0.4s ease-out;
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.animate-scaleIn {
+  animation: scaleIn 0.3s ease-out;
+}
+
+.animate-blob {
+  animation: blob 15s infinite;
+}
+
+.animation-delay-2000 {
+  animation-delay: 2s;
+}
+
+.animation-delay-4000 {
+  animation-delay: 4s;
+}
+
+/* Smooth transitions */
+/* Removed global transition for better performance */

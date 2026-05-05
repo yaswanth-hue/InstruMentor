@@ -25,10 +25,11 @@ import {
   serverTimestamp,
   arrayUnion,
   arrayRemove,
-  writeBatch
+  writeBatch,
+  increment
 } from "firebase/firestore";
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { getDatabase } from "firebase/database"; // ✅ Import Realtime Database
+import { getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 
 // Firebase config
 const firebaseConfig = {
@@ -47,8 +48,8 @@ const app = initializeApp(firebaseConfig);
 // Firebase services
 const auth = getAuth(app);
 const db = getFirestore(app);
-const storage = getStorage(app);
 const rtdb = getDatabase(app); // ✅ Initialize RTDB
+const storage = getStorage(app); // ✅ Initialize Storage for course materials/videos
 
 // Auth providers
 const googleProvider = new GoogleAuthProvider();
@@ -139,25 +140,130 @@ const unfollowUser = async (currentUserId, targetUserId) => {
 };
 
 // Posts helper functions
-const createPost = async (postData) => {
+const createPost = async (postData, imageFile = null) => {
+  console.log('createPost called with imageFile:', imageFile ? imageFile.name : 'NO IMAGE');
+  let imageUrl = null;
+
+  // Convert image to base64 if provided
+  if (imageFile) {
+    console.log('Converting post image to base64...');
+    imageUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(imageFile);
+    });
+    console.log('Post image converted successfully to base64');
+  } else {
+    console.log('No image file provided for this post');
+  }
+
+  console.log('Creating post document with imageUrl:', imageUrl ? 'BASE64_DATA' : null);
   const docRef = await addDoc(collection(db, "posts"), {
     ...postData,
+    imageUrl,
     timestamp: serverTimestamp(),
     likes: [],
     comments: []
   });
+  console.log('Post created with ID:', docRef.id);
   return docRef.id;
+};
+
+const deletePost = async (postId, userId) => {
+  const postRef = doc(db, "posts", postId);
+  const postDoc = await getDoc(postRef);
+
+  if (postDoc.exists() && postDoc.data().userId === userId) {
+    await deleteDoc(postRef);
+    return true;
+  }
+  return false;
+};
+
+const likePost = async (postId, userId) => {
+  const postRef = doc(db, "posts", postId);
+  await updateDoc(postRef, {
+    likes: arrayUnion(userId)
+  });
+};
+
+const unlikePost = async (postId, userId) => {
+  const postRef = doc(db, "posts", postId);
+  await updateDoc(postRef, {
+    likes: arrayRemove(userId)
+  });
+};
+
+const addComment = async (postId, commentData) => {
+  // Use subcollection approach only - no fallback to avoid size limits
+  const commentsRef = collection(db, "posts", postId, "comments");
+  await addDoc(commentsRef, {
+    ...commentData,
+    timestamp: new Date().toISOString()
+  });
+
+  // Also increment the comment count on the post
+  const postRef = doc(db, "posts", postId);
+  try {
+    await updateDoc(postRef, {
+      commentCount: increment(1)
+    });
+  } catch (error) {
+    // If commentCount field doesn't exist, it's okay
+    console.log("Could not update comment count:", error);
+  }
+};
+
+const getComments = async (postId) => {
+  try {
+    // Try to get from subcollection first
+    const commentsRef = collection(db, "posts", postId, "comments");
+    const q = query(commentsRef, orderBy("timestamp", "asc"));
+    const snapshot = await getDocs(q);
+
+    if (!snapshot.empty) {
+      return snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+    }
+
+    // Fallback to old method - get from post document
+    const postRef = doc(db, "posts", postId);
+    const postDoc = await getDoc(postRef);
+    if (postDoc.exists()) {
+      return postDoc.data().comments || [];
+    }
+
+    return [];
+  } catch (error) {
+    console.error("Error fetching comments:", error);
+    return [];
+  }
 };
 
 const getPosts = async (userId = null) => {
   let q;
   if (userId) {
-    q = query(collection(db, "posts"), where("userId", "==", userId), orderBy("timestamp", "desc"));
+    // Don't use orderBy with where to avoid needing a composite index
+    q = query(collection(db, "posts"), where("userId", "==", userId));
   } else {
     q = query(collection(db, "posts"), orderBy("timestamp", "desc"), limit(50));
   }
   const querySnapshot = await getDocs(q);
-  return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+  // Sort in JavaScript if filtering by userId
+  let posts = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  if (userId) {
+    posts.sort((a, b) => {
+      const aTime = a.timestamp?.toDate?.() || new Date(0);
+      const bTime = b.timestamp?.toDate?.() || new Date(0);
+      return bTime - aTime; // Descending order (newest first)
+    });
+  }
+
+  return posts;
 };
 
 const getFeedPosts = async (followingList) => {
@@ -282,7 +388,7 @@ const getEnrolledCourses = async (userId) => {
   };
 
 // Meetings helper functions
-const createMeeting = async (meetingData) => {
+export const createMeeting = async (meetingData) => {
   const docRef = await addDoc(collection(db, "meetings"), {
     ...meetingData,
     createdAt: serverTimestamp()
@@ -290,7 +396,7 @@ const createMeeting = async (meetingData) => {
   return docRef.id;
 };
 
-const getMeetings = async (courseId) => {
+export const getMeetings = async (courseId) => {
   const q = query(
     collection(db, "meetings"),
     where("courseId", "==", courseId)
@@ -307,65 +413,123 @@ const getMeetings = async (courseId) => {
 };
 
 // Single meeting
-const getMeetingById = async (meetingId) => {
+export const getMeetingById = async (meetingId) => {
   const snap = await getDoc(doc(db, "meetings", meetingId));
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 };
 
-// Course materials helpers
-const addCourseMaterial = async (courseId, file, title, uploaderId) => {
-  const filePath = `courseMaterials/${courseId}/${Date.now()}-${file.name}`;
-  const fileRef = storageRef(storage, filePath);
-  await uploadBytes(fileRef, file);
-  const fileUrl = await getDownloadURL(fileRef);
-  const docRef = await addDoc(collection(db, "courseMaterials"), {
-    courseId,
-    title,
-    fileUrl,
-    filePath,
-    uploaderId,
-    createdAt: serverTimestamp(),
+// Course materials/lectures helpers - Support large video files
+export const uploadCourseMaterial = (courseId, file, title, uploaderId, onProgress) => {
+  return new Promise((resolve, reject) => {
+    const filePath = `courseMaterials/${courseId}/${Date.now()}-${file.name}`;
+    const fileRef = storageRef(storage, filePath);
+    const uploadTask = uploadBytesResumable(fileRef, file);
+
+    uploadTask.on(
+      'state_changed',
+      (snapshot) => {
+        const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+        if (onProgress) onProgress(progress);
+      },
+      (error) => {
+        console.error('Upload error:', error);
+        reject(error);
+      },
+      async () => {
+        try {
+          const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+
+          // Get the current max order
+          const materialsRef = collection(db, "courseMaterials");
+          const q = query(materialsRef, where("courseId", "==", courseId));
+          const snapshot = await getDocs(q);
+          const maxOrder = snapshot.empty ? 0 : Math.max(...snapshot.docs.map(doc => doc.data().order || 0));
+
+          const docRef = await addDoc(materialsRef, {
+            courseId,
+            title,
+            fileUrl: downloadURL,
+            filePath,
+            uploaderId,
+            fileType: file.type,
+            fileSize: file.size,
+            fileName: file.name,
+            order: maxOrder + 1,
+            createdAt: serverTimestamp(),
+          });
+
+          resolve({ id: docRef.id, fileUrl: downloadURL });
+        } catch (error) {
+          reject(error);
+        }
+      }
+    );
   });
-  return { id: docRef.id, fileUrl };
 };
 
-const getCourseMaterials = async (courseId) => {
+export const getCourseMaterials = async (courseId) => {
   const q = query(
     collection(db, "courseMaterials"),
     where("courseId", "==", courseId),
-    orderBy("createdAt", "desc")
+    orderBy("order", "asc")
   );
   const snap = await getDocs(q);
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 };
 
-const deleteCourseMaterial = async (materialId) => {
+export const deleteCourseMaterial = async (materialId) => {
   const materialDoc = await getDoc(doc(db, "courseMaterials", materialId));
   if (materialDoc.exists()) {
     const data = materialDoc.data();
     if (data.filePath) {
-      try { await deleteObject(storageRef(storage, data.filePath)); } catch (_) {}
+      try {
+        const fileRef = storageRef(storage, data.filePath);
+        await deleteObject(fileRef);
+      } catch (error) {
+        console.error('Error deleting file from storage:', error);
+      }
     }
   }
   await deleteDoc(doc(db, "courseMaterials", materialId));
 };
 
+export const updateMaterialOrder = async (materialId, newOrder) => {
+  const materialRef = doc(db, "courseMaterials", materialId);
+  await updateDoc(materialRef, { order: newOrder });
+};
+
+export const reorderCourseMaterials = async (courseId, reorderedMaterials) => {
+  const batch = writeBatch(db);
+  reorderedMaterials.forEach((material, index) => {
+    const materialRef = doc(db, "courseMaterials", material.id);
+    batch.update(materialRef, { order: index + 1 });
+  });
+  await batch.commit();
+};
+
 // Stories helper functions
-const createStory = async (storyData, imageFile) => {
-  let mediaUrl = null;
-  
-  if (imageFile) {
-    const imagePath = `stories/${storyData.userId}/${Date.now()}-${imageFile.name}`;
-    const imageRef = storageRef(storage, imagePath);
-    await uploadBytes(imageRef, imageFile);
-    mediaUrl = await getDownloadURL(imageRef);
+const createStory = async (storyData, imageFiles) => {
+  let imageUrls = [];
+
+  if (imageFiles && imageFiles.length > 0) {
+    // Convert all images to base64
+    const uploadPromises = imageFiles.map(async (file, index) => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    });
+    imageUrls = await Promise.all(uploadPromises);
   }
-  
+
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours from now
-  
+
   const docRef = await addDoc(collection(db, "stories"), {
     ...storyData,
-    mediaUrl,
+    imageUrl: imageUrls.length > 0 ? imageUrls[0] : null, // Keep backwards compatible
+    imageUrls: imageUrls, // Support multiple images
     timestamp: serverTimestamp(),
     expiresAt,
     views: []
@@ -401,7 +565,7 @@ const getUserStories = async (userId) => {
 const getStoriesGroupedByUser = async (followingList = []) => {
   const now = new Date();
   let q;
-  
+
   if (followingList.length > 0) {
     // Get stories from followed users + own stories
     const allUserIds = [...followingList];
@@ -420,19 +584,25 @@ const getStoriesGroupedByUser = async (followingList = []) => {
       limit(50)
     );
   }
-  
+
   const querySnapshot = await getDocs(q);
   const stories = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-  
-  // Group stories by user
+
+  // Group stories by user and fetch user info
   const groupedStories = {};
   stories.forEach(story => {
     if (!groupedStories[story.userId]) {
-      groupedStories[story.userId] = [];
+      groupedStories[story.userId] = {
+        stories: [],
+        userInfo: {
+          displayName: story.userName,
+          profilePic: story.userProfilePic
+        }
+      };
     }
-    groupedStories[story.userId].push(story);
+    groupedStories[story.userId].stories.push(story);
   });
-  
+
   return groupedStories;
 };
 
@@ -464,7 +634,6 @@ const deleteExpiredStories = async () => {
 export {
   auth,
   db,
-  storage,
   rtdb,
   googleProvider,
   signInWithGoogle,
@@ -481,6 +650,11 @@ export {
   followUser,
   unfollowUser,
   createPost,
+  deletePost,
+  likePost,
+  unlikePost,
+  addComment,
+  getComments,
   getPosts,
   getFeedPosts,
   sendMessageRequest,
@@ -493,12 +667,7 @@ export {
   getEnrolledCourses,
   getCourseById,
   unenrollFromCourse,
-  createMeeting,
-  getMeetings,
-  getMeetingById,
-  addCourseMaterial,
-  getCourseMaterials,
-  deleteCourseMaterial,
+  storage,
   // Stories exports
   createStory,
   getActiveStories,

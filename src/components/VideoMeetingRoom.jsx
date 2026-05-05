@@ -31,7 +31,16 @@ import {
 } from 'lucide-react';
 import { auth, getMeetingById, getCourseById } from '../firebase';
 
-const socket = io.connect('http://localhost:3001');
+const socket = io.connect('http://localhost:3001', {
+  reconnection: true,
+  reconnectionAttempts: 3,
+  reconnectionDelay: 1000,
+  timeout: 5000
+});
+
+socket.on('connect_error', (error) => {
+  console.warn('Socket connection error (backend server not running):', error.message);
+});
 
 const VideoMeetingRoom = () => {
   const { meetingId } = useParams();
@@ -923,7 +932,7 @@ const VideoMeetingRoom = () => {
   // Render Functions
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center" style={{width: '100%', maxWidth: 'none'}}>
         <div className="text-center text-white">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto mb-4"></div>
           <p>Loading meeting...</p>
@@ -934,8 +943,8 @@ const VideoMeetingRoom = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="bg-white rounded-lg p-8 max-w-md mx-auto">
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center" style={{width: '100%', maxWidth: 'none'}}>
+        <div className="bg-white rounded-lg p-8 w-full">
           <h2 className="text-2xl font-bold text-red-600 mb-4">Cannot Join Meeting</h2>
           <p className="text-gray-700 mb-6">{error}</p>
           <button
@@ -950,7 +959,7 @@ const VideoMeetingRoom = () => {
   }
 
   return (
-    <div className="h-screen bg-gray-900 flex flex-col overflow-hidden">
+    <div className="h-screen bg-gray-900 flex flex-col overflow-hidden" style={{width: '100%', maxWidth: 'none'}}>
       {/* Header */}
       <div className="bg-gray-800 px-6 py-3 border-b border-gray-700 flex-shrink-0">
         <div className="flex items-center justify-between">
@@ -1359,7 +1368,7 @@ const VideoMeetingRoom = () => {
           </div>
         )}
 
-        <div className="flex items-center justify-center gap-3 max-w-4xl mx-auto">
+        <div className="flex items-center justify-center gap-3 w-full">
           {/* Microphone with Device Menu */}
           <div className="relative group">
             <button

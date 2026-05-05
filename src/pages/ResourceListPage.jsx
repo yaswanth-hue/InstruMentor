@@ -156,7 +156,7 @@ const ResourceListPage = () => {
       : resources.filter((r) => r.resourceType === filterType);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100 p-8 font-sans">
+    <div className="min-h-screen bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100 p-8 font-sans" style={{width: '100%', maxWidth: 'none'}}>
       <div className="mb-6 w-fit">
         <Link to="/" className="inline-block">
           <LogoWithText />
@@ -186,7 +186,7 @@ const ResourceListPage = () => {
         </select>
       </div>
 
-      <div className="grid gap-6 max-w-4xl mx-auto">
+      <div className="grid gap-6 w-full">
         {filtered.map((res) => {
           const inter = interactions[res.id] || {};
           const comments = commentsMap[res.id] || [];
