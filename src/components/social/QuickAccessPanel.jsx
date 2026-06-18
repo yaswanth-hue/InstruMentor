@@ -16,54 +16,54 @@ const QuickAccessPanel = ({ show, onClose }) => {
         <>
             {/* Backdrop */}
             <div
-                className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40"
+                className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40"
                 onClick={onClose}
             ></div>
 
             {/* Panel */}
-            <div className="fixed top-0 left-0 h-full bg-white/95 backdrop-blur-xl shadow-2xl z-50 animate-slide-in-left">
+            <div className="fixed top-0 left-0 h-full bg-slate-900/95 border-r border-slate-700 backdrop-blur-xl shadow-2xl z-50 animate-slide-in-left">
                 <div className="p-6 h-full overflow-y-auto">
                     <div className="flex items-center justify-between mb-6">
-                        <h2 className="text-xl font-bold text-gray-900 flex items-center gap-3">
-                            <div className="w-10 h-10 bg-gradient-to-br from-indigo-500 to-purple-500 rounded-2xl flex items-center justify-center">
+                        <h2 className="text-xl font-bold text-slate-100 flex items-center gap-3">
+                            <div className="w-10 h-10 bg-slate-800 border border-sky-400/30 rounded-2xl flex items-center justify-center">
                                 <Music className="w-6 h-6 text-white" />
                             </div>
                             Quick Access
                         </h2>
                         <button
                             onClick={onClose}
-                            className="p-2 hover:bg-indigo-50 rounded-xl transition-colors"
+                            className="p-2 hover:bg-slate-800 rounded-xl transition-colors"
                         >
-                            <X className="w-5 h-5 text-gray-600" />
+                            <X className="w-5 h-5 text-slate-300" />
                         </button>
                     </div>
                     <div className="space-y-3 min-w-[280px]">
                         <button
                             onClick={() => navigateTo('/users')}
-                            className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-5 py-4 rounded-2xl flex items-center gap-3 transition-all shadow-lg hover:shadow-xl hover:scale-105 font-semibold"
+                            className="w-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-5 py-4 rounded-2xl flex items-center gap-3 transition-all font-semibold"
                         >
-                            <Users className="w-5 h-5" />
+                            <Users className="w-5 h-5 text-sky-300" />
                             Discover Musicians
                         </button>
                         <button
                             onClick={() => navigateTo('/courses')}
-                            className="w-full bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white px-5 py-4 rounded-2xl flex items-center gap-3 transition-all shadow-lg hover:shadow-xl hover:scale-105 font-semibold"
+                            className="w-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-5 py-4 rounded-2xl flex items-center gap-3 transition-all font-semibold"
                         >
-                            <BookOpen className="w-5 h-5" />
+                            <BookOpen className="w-5 h-5 text-sky-300" />
                             Browse Courses
                         </button>
                         <button
                             onClick={() => navigateTo('/audio-rooms')}
-                            className="w-full bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white px-5 py-4 rounded-2xl flex items-center gap-3 transition-all shadow-lg hover:shadow-xl hover:scale-105 font-semibold"
+                            className="w-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-5 py-4 rounded-2xl flex items-center gap-3 transition-all font-semibold"
                         >
-                            <Mic className="w-5 h-5" />
+                            <Mic className="w-5 h-5 text-sky-300" />
                             Join Audio Rooms
                         </button>
                         <button
                             onClick={() => navigateTo('/original-home')}
-                            className="w-full bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white px-5 py-4 rounded-2xl flex items-center gap-3 transition-all shadow-lg hover:shadow-xl hover:scale-105 font-semibold"
+                            className="w-full bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white px-5 py-4 rounded-2xl flex items-center gap-3 transition-all font-semibold"
                         >
-                            <Play className="w-5 h-5" />
+                            <Play className="w-5 h-5 text-sky-300" />
                             Virtual Instruments
                         </button>
                     </div>

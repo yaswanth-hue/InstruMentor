@@ -1,28 +1,28 @@
 import React from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../firebase';
 import AudioRoomComponent from '../components/AudioRoomComponent';
-import { LogIn } from 'lucide-react';
+import { LogIn, Radio } from 'lucide-react';
 
 const AudioRoomPage = () => {
   const { roomId } = useParams();
   const [user, loading] = useAuthState(auth);
   const navigate = useNavigate();
+  const location = useLocation();
+  const isHost = location.state?.isHost === true;
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-100 flex items-center justify-center" style={{width: '100%', maxWidth: 'none'}}>
-        <div className="text-center">
-          <div className="relative">
-            <div className="w-20 h-20 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin mx-auto"></div>
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 flex items-center justify-center" style={{ width: '100%', maxWidth: 'none' }}>
+        <div className="text-center space-y-4">
+          <div className="relative w-16 h-16 mx-auto">
+            <div className="w-16 h-16 rounded-full border-4 border-slate-700 border-t-sky-500 animate-spin" />
             <div className="absolute inset-0 flex items-center justify-center">
-              <svg className="w-8 h-8 text-purple-600 animate-pulse" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" />
-              </svg>
+              <Radio className="w-6 h-6 text-sky-400 animate-pulse" />
             </div>
           </div>
-          <p className="mt-6 text-gray-600 font-medium">Authenticating...</p>
+          <p className="text-slate-400 text-sm">Authenticating…</p>
         </div>
       </div>
     );
@@ -30,30 +30,25 @@ const AudioRoomPage = () => {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-100 flex items-center justify-center p-4" style={{width: '100%', maxWidth: 'none'}}>
-        <div className="max-w-md w-full">
-          <div className="bg-white rounded-2xl shadow-2xl p-8 text-center">
-            <div className="w-20 h-20 bg-gradient-to-br from-red-500 to-pink-500 rounded-full mx-auto flex items-center justify-center mb-6">
-              <LogIn className="w-10 h-10 text-white" />
-            </div>
-            <h2 className="text-2xl font-bold text-gray-800 mb-3">Authentication Required</h2>
-            <p className="text-gray-600 mb-6">
-              Please log in to join the audio room and collaborate with other musicians.
-            </p>
-            <button
-              onClick={() => navigate('/login', { state: { from: `/audio-room/${roomId}` } })}
-              className="w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 flex items-center justify-center space-x-2"
-            >
-              <LogIn className="w-5 h-5" />
-              <span>Log In to Continue</span>
-            </button>
-            <button
-              onClick={() => navigate('/audio-rooms')}
-              className="w-full mt-3 px-6 py-3 border-2 border-gray-300 hover:border-purple-400 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-all duration-200"
-            >
-              Back to Rooms
-            </button>
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 flex items-center justify-center p-4" style={{ width: '100%', maxWidth: 'none' }}>
+        <div className="w-full max-w-sm rounded-3xl border border-sky-300/20 bg-slate-900/80 backdrop-blur-xl p-8 text-center shadow-2xl shadow-black/50">
+          <div className="w-16 h-16 rounded-2xl bg-slate-800 border border-red-400/20 flex items-center justify-center mx-auto mb-5">
+            <LogIn className="w-8 h-8 text-red-400" />
           </div>
+          <h2 className="text-xl font-bold text-slate-100 mb-2">Sign in required</h2>
+          <p className="text-slate-400 text-sm mb-6">Please log in to join this audio room.</p>
+          <button
+            onClick={() => navigate('/login', { state: { from: `/audio-room/${roomId}` } })}
+            className="w-full rounded-2xl bg-gradient-to-r from-sky-600 via-blue-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-900/30 transition-all duration-200 flex items-center justify-center gap-2 mb-3"
+          >
+            <LogIn className="w-4 h-4" /> Log In
+          </button>
+          <button
+            onClick={() => navigate('/audio-rooms')}
+            className="w-full rounded-2xl border border-slate-700 bg-slate-900 hover:bg-slate-800 py-3 text-sm font-semibold text-slate-300 transition-colors"
+          >
+            Back to Rooms
+          </button>
         </div>
       </div>
     );
@@ -63,9 +58,9 @@ const AudioRoomPage = () => {
     <AudioRoomComponent
       roomId={roomId}
       userId={user.uid}
-      userName={user.displayName || user.email}
+      userName={user.displayName || user.email.split('@')[0]}
       userEmail={user.email}
-      isHost={false}
+      isHost={isHost}
     />
   );
 };

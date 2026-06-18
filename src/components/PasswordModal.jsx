@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Lock, AlertCircle } from 'lucide-react';
+import { X, Lock, AlertCircle, Loader } from 'lucide-react';
 
 const PasswordModal = ({ isOpen, onClose, onSubmit, roomTitle }) => {
   const [password, setPassword] = useState('');
@@ -10,14 +10,9 @@ const PasswordModal = ({ isOpen, onClose, onSubmit, roomTitle }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!password) {
-      setError('Please enter a password');
-      return;
-    }
-
+    if (!password) { setError('Please enter a password'); return; }
     setIsVerifying(true);
     setError('');
-
     try {
       await onSubmit(password);
     } catch (err) {
@@ -34,93 +29,78 @@ const PasswordModal = ({ isOpen, onClose, onSubmit, roomTitle }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-50 backdrop-blur-sm animate-fadeIn">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full animate-slideUp">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div
+        className="w-full max-w-sm rounded-3xl border border-sky-300/20 bg-slate-900/95 backdrop-blur-2xl shadow-2xl shadow-black/60"
+        style={{ animation: 'scaleIn 0.2s ease both' }}
+      >
         {/* Header */}
-        <div className="bg-gradient-to-r from-yellow-500 to-orange-500 text-white p-6 rounded-t-2xl flex items-center justify-between">
-          <div className="flex items-center">
-            <Lock className="w-6 h-6 mr-3" />
+        <div className="flex items-center justify-between px-6 py-5 border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-2xl bg-slate-800 border border-amber-400/20 flex items-center justify-center shrink-0">
+              <Lock className="w-4 h-4 text-amber-300" />
+            </div>
             <div>
-              <h2 className="text-xl font-bold">Private Room</h2>
-              <p className="text-yellow-100 text-sm mt-1">Password required</p>
+              <h2 className="text-base font-bold text-slate-100">Private Room</h2>
+              <p className="text-xs text-slate-400">Password required to join</p>
             </div>
           </div>
           <button
             onClick={handleClose}
-            className="text-white hover:bg-white hover:bg-opacity-20 rounded-full p-2 transition-all duration-200"
             disabled={isVerifying}
+            className="rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 p-2 text-slate-400 hover:text-slate-200 transition-colors disabled:opacity-50"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Form */}
+        {/* Body */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <p className="text-gray-700 mb-4">
-              <span className="font-semibold">"{roomTitle}"</span> is a private room.
-            </p>
-            <p className="text-sm text-gray-500 mb-4">
-              Enter the password to join this room.
-            </p>
-          </div>
+          <p className="text-sm text-slate-300">
+            <span className="font-semibold text-slate-100">"{roomTitle}"</span> is a private room. Enter the password to join.
+          </p>
 
-          {/* Error Message */}
+          {/* Error */}
           {error && (
-            <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-lg flex items-start animate-shake">
-              <AlertCircle className="w-5 h-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" />
-              <p className="text-red-700 text-sm font-medium">{error}</p>
+            <div className="flex items-center gap-2.5 rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+              <span className="text-sm text-red-300 font-medium">{error}</span>
             </div>
           )}
 
-          {/* Password Input */}
+          {/* Input */}
           <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              Password
-            </label>
+            <label className="block text-xs font-semibold text-slate-300 mb-1.5">Password</label>
             <input
               type="password"
               value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                setError('');
-              }}
+              onChange={(e) => { setPassword(e.target.value); setError(''); }}
               placeholder="Enter room password"
-              className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:border-yellow-500 transition-colors duration-200"
               autoFocus
               disabled={isVerifying}
+              className="w-full rounded-2xl border border-slate-700 bg-slate-950/50 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-amber-400/60 focus:outline-none focus:ring-2 focus:ring-amber-500/20 transition disabled:opacity-50"
             />
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex gap-3 pt-4">
+          {/* Actions */}
+          <div className="flex gap-3 pt-1">
             <button
               type="button"
               onClick={handleClose}
-              className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 font-semibold rounded-lg hover:bg-gray-50 transition-all duration-200"
               disabled={isVerifying}
+              className="flex-1 rounded-2xl border border-slate-700 bg-slate-900 hover:bg-slate-800 py-3 text-sm font-semibold text-slate-300 transition-colors disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="flex-1 px-6 py-3 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               disabled={isVerifying || !password}
+              className="flex-1 rounded-2xl bg-gradient-to-r from-sky-600 via-blue-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-900/30 transition-all duration-200 disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              {isVerifying ? (
-                <span className="flex items-center justify-center">
-                  <svg className="animate-spin h-5 w-5 mr-2" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                  Verifying...
-                </span>
-              ) : (
-                <span className="flex items-center justify-center">
-                  <Lock className="w-4 h-4 mr-2" />
-                  Join Room
-                </span>
-              )}
+              {isVerifying
+                ? <><Loader className="w-4 h-4 animate-spin" /> Verifying…</>
+                : <><Lock className="w-4 h-4" /> Join Room</>
+              }
             </button>
           </div>
         </form>

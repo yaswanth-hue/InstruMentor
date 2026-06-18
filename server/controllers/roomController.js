@@ -1,5 +1,4 @@
 import { stateService } from '../services/stateService.js';
-import { io } from '../index.js'; // We'll need to export io from main entry or pass it via request
 
 export const getRooms = async (req, res) => {
     const rooms = await stateService.getRooms();
@@ -22,6 +21,13 @@ export const createRoom = async (req, res) => {
     };
 
     await stateService.createRoom(newRoom);
+
+    // Broadcast new room to all list-page clients (exclude password_hash)
+    if (req.io) {
+        const publicRoom = { ...newRoom, password_hash: undefined };
+        req.io.emit('room-created', publicRoom);
+    }
+
     res.json(newRoom);
 };
 
@@ -44,8 +50,6 @@ export const updateRoomSettings = async (req, res) => {
     const updatedRoom = await stateService.updateRoom(id, updates);
     if (!updatedRoom) return res.status(404).json({ error: 'Room not found' });
 
-    // Broadcast update
-    // We need io instance. Since this is a module, we can attach it to req in middleware.
     if (req.io) {
         req.io.to(id).emit('room-settings-updated', updates);
     }
@@ -61,7 +65,8 @@ export const deleteRoom = async (req, res) => {
     await stateService.deleteRoom(id);
 
     if (req.io) {
-        req.io.to(id).emit('room-closed');
+        req.io.to(id).emit('room-closed', { roomId: id });
+        req.io.emit('room-deleted', { roomId: id });
     }
 
     res.json({ message: 'Room deleted successfully' });

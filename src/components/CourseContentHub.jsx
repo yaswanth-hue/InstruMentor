@@ -254,8 +254,8 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
     return (
       <div className="flex items-center justify-center py-16">
         <div className="text-center">
-          <Loader className="w-12 h-12 text-purple-600 animate-spin mx-auto mb-4" />
-          <p className="text-gray-600 font-medium">Loading content...</p>
+          <Loader className="w-12 h-12 text-sky-500 animate-spin mx-auto mb-4" />
+          <p className="text-slate-300 font-medium">Loading content...</p>
         </div>
       </div>
     );
@@ -264,18 +264,18 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
   return (
     <div className="space-y-6">
       {/* Header with Gradient */}
-      <div className="bg-gradient-to-r from-purple-600 via-pink-500 to-blue-500 rounded-2xl shadow-lg p-6 sm:p-8 relative overflow-hidden">
-        <div className="absolute inset-0 bg-black/10"></div>
-        <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl"></div>
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-2xl shadow-lg p-6 sm:p-8 relative overflow-hidden border border-sky-300/20">
+        <div className="absolute inset-0 bg-black/30"></div>
+        <div className="absolute top-0 right-0 w-64 h-64 bg-sky-500/20 rounded-full blur-3xl"></div>
 
         <div className="relative">
           <div className="flex items-center gap-4">
-            <div className="bg-white/20 backdrop-blur-sm p-3 rounded-xl">
+            <div className="bg-slate-800/80 backdrop-blur-sm p-3 rounded-xl border border-sky-300/20">
               <Film className="w-8 h-8 text-white" />
             </div>
             <div className="flex-1">
               <h2 className="text-2xl sm:text-3xl font-bold text-white drop-shadow-md">Course Content</h2>
-              <p className="text-white/90 mt-1">
+              <p className="text-slate-300 mt-1">
                 {lectures.length} lecture{lectures.length !== 1 ? 's' : ''} • {meetings.length} meeting{meetings.length !== 1 ? 's' : ''}
               </p>
             </div>
@@ -287,13 +287,13 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
               onClick={() => setActiveTab('lectures')}
               className={`flex-1 px-4 sm:px-6 py-3 rounded-xl font-semibold transition-all duration-300 flex items-center justify-center gap-2 ${
                 activeTab === 'lectures'
-                  ? 'bg-white text-purple-600 shadow-lg'
-                  : 'bg-white/20 backdrop-blur-sm text-white hover:bg-white/30'
+                  ? 'bg-slate-100 text-slate-900 shadow-lg'
+                  : 'bg-slate-800/70 backdrop-blur-sm text-slate-200 hover:bg-slate-700/80'
               }`}
             >
               <Video className="w-5 h-5" />
               <span>Lectures</span>
-              <span className="px-2 py-0.5 rounded-full bg-purple-600 text-white text-xs font-bold">
+              <span className="px-2 py-0.5 rounded-full bg-sky-600 text-white text-xs font-bold">
                 {lectures.length}
               </span>
             </button>
@@ -301,13 +301,13 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
               onClick={() => setActiveTab('meetings')}
               className={`flex-1 px-4 sm:px-6 py-3 rounded-xl font-semibold transition-all duration-300 flex items-center justify-center gap-2 ${
                 activeTab === 'meetings'
-                  ? 'bg-white text-purple-600 shadow-lg'
-                  : 'bg-white/20 backdrop-blur-sm text-white hover:bg-white/30'
+                  ? 'bg-slate-100 text-slate-900 shadow-lg'
+                  : 'bg-slate-800/70 backdrop-blur-sm text-slate-200 hover:bg-slate-700/80'
               }`}
             >
               <Calendar className="w-5 h-5" />
               <span>Meetings</span>
-              <span className="px-2 py-0.5 rounded-full bg-purple-600 text-white text-xs font-bold">
+              <span className="px-2 py-0.5 rounded-full bg-sky-600 text-white text-xs font-bold">
                 {meetings.length}
               </span>
             </button>
@@ -316,7 +316,7 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
       </div>
 
       {/* Content Area */}
-      <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+      <div className="bg-slate-900/85 rounded-2xl shadow-2xl shadow-black/30 border border-sky-300/20 overflow-hidden">
         {/* Lectures Tab */}
         {activeTab === 'lectures' && (
           <div className="p-6 sm:p-8">
@@ -325,7 +325,7 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
               <div className="mb-6">
                 <button
                   onClick={() => setShowUploadModal(true)}
-                  className="px-5 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold flex items-center gap-2 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105"
+                  className="px-5 py-3 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-700 hover:to-cyan-700 text-white font-semibold flex items-center gap-2 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105"
                 >
                   <Upload className="w-5 h-5" />
                   Upload New Lecture
@@ -335,11 +335,11 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
 
             {lectures.length === 0 ? (
               <div className="text-center py-16">
-                <div className="bg-gradient-to-br from-purple-100 to-pink-100 rounded-full p-6 inline-block mb-4">
-                  <FileVideo className="w-16 h-16 text-purple-600" />
+                <div className="bg-gradient-to-br from-sky-900/60 to-cyan-900/60 rounded-full p-6 inline-block mb-4">
+                  <FileVideo className="w-16 h-16 text-sky-300" />
                 </div>
-                <h3 className="text-xl font-bold text-gray-800 mb-2">No lectures yet</h3>
-                <p className="text-gray-600">
+                <h3 className="text-xl font-bold text-slate-100 mb-2">No lectures yet</h3>
+                <p className="text-slate-300">
                   {isInstructor
                     ? 'Click the button above to upload your first lecture!'
                     : 'Lectures will appear here once the instructor uploads them.'}
@@ -356,32 +356,32 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                     onDragEnd={handleDragEnd}
                     className={`group rounded-xl border-2 transition-all duration-300 ${
                       playingVideo === lecture.id
-                        ? 'border-purple-500 bg-purple-50 shadow-lg'
-                        : 'border-gray-200 hover:border-purple-300 hover:shadow-md bg-white'
+                        ? 'border-sky-500 bg-slate-800/90 shadow-lg'
+                        : 'border-slate-700 hover:border-sky-400/60 hover:shadow-md bg-slate-900/70'
                     } ${draggedItem === index ? 'opacity-50 scale-95' : ''}`}
                   >
                     <div className="p-4 sm:p-5">
                       <div className="flex items-center gap-4">
                         {isInstructor && (
-                          <div className="cursor-move text-gray-400 hover:text-purple-600 transition-colors">
+                          <div className="cursor-move text-slate-500 hover:text-sky-300 transition-colors">
                             <GripVertical className="w-5 h-5" />
                           </div>
                         )}
 
-                        <div className="flex-shrink-0 w-14 h-14 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-md">
+                        <div className="flex-shrink-0 w-14 h-14 bg-gradient-to-br from-sky-500 to-cyan-500 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-md">
                           {index + 1}
                         </div>
 
                         <div className="flex-1 min-w-0">
-                          <h3 className="text-lg font-bold text-gray-800 truncate">{lecture.title}</h3>
-                          <div className="flex flex-wrap items-center gap-3 mt-1 text-sm text-gray-600">
+                          <h3 className="text-lg font-bold text-slate-100 truncate">{lecture.title}</h3>
+                          <div className="flex flex-wrap items-center gap-3 mt-1 text-sm text-slate-300">
                             <span className="flex items-center gap-1">
                               <FileVideo className="w-4 h-4" />
                               {lecture.fileName || 'Video'}
                             </span>
                             {lecture.fileSize && (
                               <>
-                                <span className="text-gray-400">•</span>
+                                <span className="text-slate-500">•</span>
                                 <span>{formatFileSize(lecture.fileSize)}</span>
                               </>
                             )}
@@ -391,7 +391,7 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => setPlayingVideo(playingVideo === lecture.id ? null : lecture.id)}
-                            className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white flex items-center gap-2 font-semibold transition-all duration-300 hover:scale-105 shadow-md"
+                            className="px-4 py-2 rounded-xl bg-gradient-to-r from-sky-500 to-cyan-500 hover:from-sky-600 hover:to-cyan-600 text-white flex items-center gap-2 font-semibold transition-all duration-300 hover:scale-105 shadow-md"
                           >
                             <Play className="w-4 h-4" />
                             <span className="hidden sm:inline">Play</span>
@@ -400,7 +400,7 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                           {isInstructor && (
                             <button
                               onClick={() => handleDelete(lecture.id)}
-                              className="px-4 py-2 rounded-xl bg-red-100 hover:bg-red-200 text-red-700 flex items-center gap-2 font-medium transition-all duration-300"
+                            className="px-4 py-2 rounded-xl bg-red-900/20 hover:bg-red-900/35 border border-red-400/30 text-red-300 flex items-center gap-2 font-medium transition-all duration-300"
                             >
                               <Trash2 className="w-4 h-4" />
                               <span className="hidden sm:inline">Delete</span>
@@ -447,11 +447,11 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
 
             {meetings.length === 0 ? (
               <div className="text-center py-16">
-                <div className="bg-gradient-to-br from-blue-100 to-cyan-100 rounded-full p-6 inline-block mb-4">
-                  <Calendar className="w-16 h-16 text-blue-600" />
+                <div className="bg-gradient-to-br from-sky-900/60 to-cyan-900/60 rounded-full p-6 inline-block mb-4">
+                  <Calendar className="w-16 h-16 text-sky-300" />
                 </div>
-                <h3 className="text-xl font-bold text-gray-800 mb-2">No meetings scheduled</h3>
-                <p className="text-gray-600">
+                <h3 className="text-xl font-bold text-slate-100 mb-2">No meetings scheduled</h3>
+                <p className="text-slate-300">
                   {isInstructor
                     ? 'Click the button above to schedule your first meeting!'
                     : 'Meetings will appear here once scheduled.'}
@@ -467,12 +467,12 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                   return (
                     <div
                       key={meeting.id}
-                      className="group bg-white rounded-xl border-2 border-gray-200 hover:border-blue-300 hover:shadow-md transition-all duration-300"
+                      className="group bg-slate-900/70 rounded-xl border-2 border-slate-700 hover:border-sky-400/60 hover:shadow-md transition-all duration-300"
                     >
                       <div className="p-4 sm:p-5">
                         <div className="flex items-start gap-4">
                           <div className={`flex-shrink-0 w-14 h-14 rounded-xl flex items-center justify-center text-white font-bold shadow-md ${
-                            isPast ? 'bg-gradient-to-br from-gray-400 to-gray-500' : 'bg-gradient-to-br from-blue-500 to-cyan-500'
+                            isPast ? 'bg-gradient-to-br from-slate-500 to-slate-600' : 'bg-gradient-to-br from-sky-500 to-cyan-500'
                           }`}>
                             <Calendar className="w-7 h-7" />
                           </div>
@@ -480,15 +480,15 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                           <div className="flex-1 min-w-0">
                             <div className="flex items-start justify-between gap-3">
                               <div className="flex-1">
-                                <h3 className="text-lg font-bold text-gray-800">{meeting.title}</h3>
-                                <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-gray-600">
+                                <h3 className="text-lg font-bold text-slate-100">{meeting.title}</h3>
+                                <div className="flex flex-wrap items-center gap-3 mt-2 text-sm text-slate-300">
                                   <span className="flex items-center gap-1">
                                     <Clock className="w-4 h-4" />
                                     {formatDate(meeting.scheduledTime)}
                                   </span>
                                   {meeting.participants && (
                                     <>
-                                      <span className="text-gray-400">•</span>
+                                      <span className="text-slate-500">•</span>
                                       <span className="flex items-center gap-1">
                                         <Users className="w-4 h-4" />
                                         {meeting.participants.length} participant{meeting.participants.length !== 1 ? 's' : ''}
@@ -497,8 +497,8 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                                   )}
                                   {isPast && (
                                     <>
-                                      <span className="text-gray-400">•</span>
-                                      <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 text-xs font-semibold">
+                                      <span className="text-slate-500">•</span>
+                                      <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 text-xs font-semibold border border-slate-600">
                                         Completed
                                       </span>
                                     </>
@@ -508,26 +508,28 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
 
                               <button
                                 onClick={() => setExpandedMeeting(isExpanded ? null : meeting.id)}
-                                className="text-gray-400 hover:text-purple-600 transition-colors"
+                                className="text-slate-500 hover:text-sky-300 transition-colors"
                               >
                                 {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                               </button>
                             </div>
 
                             {isExpanded && (
-                              <div className="mt-4 pt-4 border-t border-gray-200 space-y-3">
+                              <div className="mt-4 pt-4 border-t border-slate-700 space-y-3">
                                 {meeting.description && (
-                                  <p className="text-gray-600 leading-relaxed">{meeting.description}</p>
+                                  <p className="text-slate-300 leading-relaxed">{meeting.description}</p>
                                 )}
-                                <div className="flex flex-wrap gap-2">
-                                  <button
-                                    onClick={() => startMeeting(meeting.id)}
-                                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white font-semibold flex items-center gap-2 shadow-md hover:shadow-lg transition-all duration-300 hover:scale-105"
-                                  >
-                                    <Phone className="w-4 h-4" />
-                                    {isPast ? 'View Recording' : isInstructor ? 'Start Meeting' : 'Join Meeting'}
-                                  </button>
-                                </div>
+                                {!isPast && (
+                                  <div className="flex flex-wrap gap-2">
+                                    <button
+                                      onClick={() => startMeeting(meeting.id)}
+                                      className={`px-5 py-2.5 rounded-xl bg-gradient-to-r ${isInstructor ? 'from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600' : 'from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600'} text-white font-semibold flex items-center gap-2 shadow-md hover:shadow-lg transition-all duration-300 hover:scale-105`}
+                                    >
+                                      <Phone className="w-4 h-4" />
+                                      {isInstructor ? 'Start Meeting' : 'Join Meeting'}
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
@@ -545,8 +547,8 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
       {/* Upload Modal */}
       {showUploadModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
-          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-slideUp">
-            <div className="bg-gradient-to-r from-purple-600 to-pink-600 p-6">
+          <div className="bg-slate-900 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-slideUp border border-sky-300/20">
+            <div className="bg-gradient-to-r from-sky-600 to-cyan-600 p-6">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="bg-white/20 backdrop-blur-sm p-2 rounded-xl">
@@ -566,7 +568,7 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
 
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="block text-sm font-semibold text-slate-200 mb-2">
                   Video File *
                 </label>
                 <div className="relative">
@@ -582,21 +584,21 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                     htmlFor="video-upload"
                     className={`block w-full px-4 py-8 border-2 border-dashed rounded-xl text-center cursor-pointer transition-all duration-300 ${
                       selectedFile
-                        ? 'border-purple-500 bg-purple-50'
-                        : 'border-gray-300 hover:border-purple-400 hover:bg-purple-50/50'
+                        ? 'border-sky-500 bg-sky-900/20'
+                        : 'border-slate-600 hover:border-sky-400 hover:bg-sky-900/20'
                     } ${uploading ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     {selectedFile ? (
                       <div className="space-y-2">
-                        <FileVideo className="w-12 h-12 text-purple-600 mx-auto" />
-                        <p className="font-medium text-gray-800">{selectedFile.name}</p>
-                        <p className="text-sm text-gray-600">{formatFileSize(selectedFile.size)}</p>
+                        <FileVideo className="w-12 h-12 text-sky-300 mx-auto" />
+                        <p className="font-medium text-slate-100">{selectedFile.name}</p>
+                        <p className="text-sm text-slate-300">{formatFileSize(selectedFile.size)}</p>
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        <Upload className="w-12 h-12 text-gray-400 mx-auto" />
-                        <p className="font-medium text-gray-700">Click to select video</p>
-                        <p className="text-sm text-gray-500">No size limit • All video formats supported</p>
+                        <Upload className="w-12 h-12 text-slate-500 mx-auto" />
+                        <p className="font-medium text-slate-200">Click to select video</p>
+                        <p className="text-sm text-slate-400">No size limit • All video formats supported</p>
                       </div>
                     )}
                   </label>
@@ -604,7 +606,7 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="block text-sm font-semibold text-slate-200 mb-2">
                   Lecture Title *
                 </label>
                 <input
@@ -613,13 +615,13 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                   onChange={(e) => setLectureTitle(e.target.value)}
                   placeholder="Enter lecture title..."
                   disabled={uploading}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-purple-500 transition-colors duration-300"
+                  className="w-full px-4 py-3 border-2 border-slate-700 bg-slate-800 text-slate-100 rounded-xl focus:outline-none focus:border-sky-500 transition-colors duration-300"
                 />
               </div>
 
               {/* Attachments Section */}
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="block text-sm font-semibold text-slate-200 mb-2">
                   Attachments (Optional)
                 </label>
                 <div className="space-y-2">
@@ -635,10 +637,10 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                   <label
                     htmlFor="attachment-upload"
                     className={`block w-full px-4 py-3 border-2 border-dashed rounded-xl text-center cursor-pointer transition-all duration-300 ${
-                      uploading ? 'opacity-50 cursor-not-allowed' : 'border-gray-300 hover:border-purple-400 hover:bg-purple-50/50'
+                      uploading ? 'opacity-50 cursor-not-allowed' : 'border-slate-600 hover:border-sky-400 hover:bg-sky-900/20'
                     }`}
                   >
-                    <div className="flex items-center justify-center gap-2 text-gray-600">
+                    <div className="flex items-center justify-center gap-2 text-slate-300">
                       <Paperclip className="w-5 h-5" />
                       <span className="text-sm font-medium">Add files (images, PDFs, documents)</span>
                     </div>
@@ -648,15 +650,15 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                   {attachments.length > 0 && (
                     <div className="grid grid-cols-2 gap-2 mt-2">
                       {attachments.map((attachment, index) => (
-                        <div key={index} className="relative group border-2 border-gray-200 rounded-lg p-2 hover:border-purple-300 transition-colors">
+                        <div key={index} className="relative group border-2 border-slate-700 rounded-lg p-2 hover:border-sky-400 transition-colors">
                           {attachment.preview ? (
                             <img src={attachment.preview} alt={attachment.name} className="w-full h-20 object-cover rounded" />
                           ) : (
                             <div className="flex items-center gap-2">
-                              <FileText className="w-8 h-8 text-gray-400" />
+                              <FileText className="w-8 h-8 text-slate-500" />
                               <div className="flex-1 min-w-0">
-                                <p className="text-xs font-medium text-gray-700 truncate">{attachment.name}</p>
-                                <p className="text-xs text-gray-500">{formatFileSize(attachment.size)}</p>
+                                <p className="text-xs font-medium text-slate-200 truncate">{attachment.name}</p>
+                                <p className="text-xs text-slate-400">{formatFileSize(attachment.size)}</p>
                               </div>
                             </div>
                           )}
@@ -677,12 +679,12 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
               {uploading && (
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm font-medium">
-                    <span className="text-gray-700">Uploading...</span>
-                    <span className="text-purple-600">{Math.round(uploadProgress)}%</span>
+                    <span className="text-slate-300">Uploading...</span>
+                    <span className="text-sky-300">{Math.round(uploadProgress)}%</span>
                   </div>
-                  <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                  <div className="w-full bg-slate-700 rounded-full h-3 overflow-hidden">
                     <div
-                      className="h-full bg-gradient-to-r from-purple-600 to-pink-600 transition-all duration-300 rounded-full"
+                      className="h-full bg-gradient-to-r from-sky-600 to-cyan-600 transition-all duration-300 rounded-full"
                       style={{ width: `${uploadProgress}%` }}
                     />
                   </div>
@@ -690,18 +692,18 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
               )}
             </div>
 
-            <div className="p-6 flex justify-end gap-3 border-t">
+            <div className="p-6 flex justify-end gap-3 border-t border-slate-700">
               <button
                 onClick={() => setShowUploadModal(false)}
                 disabled={uploading}
-                className="px-6 py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 font-medium text-gray-700 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-6 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 font-medium text-slate-100 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancel
               </button>
               <button
                 onClick={handleUpload}
                 disabled={!selectedFile || !lectureTitle.trim() || uploading}
-                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-700 hover:to-cyan-700 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
                 {uploading ? (
                   <>
@@ -723,7 +725,7 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
       {/* Create Meeting Modal */}
       {showMeetingModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fadeIn">
-          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-slideUp">
+          <div className="bg-slate-900 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-slideUp border border-sky-300/20">
             <div className="bg-gradient-to-r from-blue-600 to-cyan-600 p-6">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -743,7 +745,7 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
 
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="block text-sm font-semibold text-slate-200 mb-2">
                   Meeting Title *
                 </label>
                 <input
@@ -751,12 +753,12 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                   value={newMeeting.title}
                   onChange={(e) => setNewMeeting(prev => ({ ...prev, title: e.target.value }))}
                   placeholder="Enter meeting title..."
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 transition-colors duration-300"
+                  className="w-full px-4 py-3 border-2 border-slate-700 bg-slate-800 text-slate-100 rounded-xl focus:outline-none focus:border-sky-500 transition-colors duration-300"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="block text-sm font-semibold text-slate-200 mb-2">
                   Description (Optional)
                 </label>
                 <textarea
@@ -764,28 +766,28 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                   onChange={(e) => setNewMeeting(prev => ({ ...prev, description: e.target.value }))}
                   placeholder="What will this meeting be about?"
                   rows="3"
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl resize-none focus:outline-none focus:border-blue-500 transition-colors duration-300"
+                  className="w-full px-4 py-3 border-2 border-slate-700 bg-slate-800 text-slate-100 rounded-xl resize-none focus:outline-none focus:border-sky-500 transition-colors duration-300"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="block text-sm font-semibold text-slate-200 mb-2">
                   Scheduled Time *
                 </label>
                 <input
                   type="datetime-local"
                   value={newMeeting.scheduledTime}
                   onChange={(e) => setNewMeeting(prev => ({ ...prev, scheduledTime: e.target.value }))}
-                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-blue-500 transition-colors duration-300"
+                  className="w-full px-4 py-3 border-2 border-slate-700 bg-slate-800 text-slate-100 rounded-xl focus:outline-none focus:border-sky-500 transition-colors duration-300"
                 />
               </div>
 
-              <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
+              <div className="bg-sky-900/20 border-2 border-sky-400/30 rounded-xl p-4">
                 <div className="flex items-start gap-3">
-                  <Users className="w-5 h-5 text-blue-600 mt-0.5" />
+                  <Users className="w-5 h-5 text-sky-300 mt-0.5" />
                   <div>
-                    <p className="text-sm font-semibold text-gray-800">Participants</p>
-                    <p className="text-xs text-gray-600 mt-1">
+                    <p className="text-sm font-semibold text-slate-100">Participants</p>
+                    <p className="text-xs text-slate-300 mt-1">
                       All enrolled students will be invited to this meeting
                     </p>
                   </div>
@@ -793,10 +795,10 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
               </div>
             </div>
 
-            <div className="p-6 flex justify-end gap-3 border-t">
+            <div className="p-6 flex justify-end gap-3 border-t border-slate-700">
               <button
                 onClick={() => setShowMeetingModal(false)}
-                className="px-6 py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 font-medium text-gray-700 transition-all duration-300"
+                className="px-6 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 font-medium text-slate-100 transition-all duration-300"
               >
                 Cancel
               </button>

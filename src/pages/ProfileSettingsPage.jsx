@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import { auth, db } from '../firebase';
@@ -7,115 +7,112 @@ import {
   ArrowLeft,
   User,
   Mail,
-  Clock,
-  Edit2,
   Save,
-  X,
-  Settings
+  Settings,
+  Shield,
+  Bell,
+  Eye,
+  EyeOff,
+  Copy,
+  Link as LinkIcon
 } from 'lucide-react';
+
+const defaultForm = {
+  displayName: '',
+  username: '',
+  bio: '',
+  isPrivate: false,
+  allowTags: true,
+  showActivityStatus: true,
+  messagePermission: 'everyone'
+};
 
 const ProfileSettingsPage = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [userProfile, setUserProfile] = useState(null);
-
-  // Edit states
-  const [displayName, setDisplayName] = useState('');
-  const [bio, setBio] = useState('');
-  const [username, setUsername] = useState('');
-  const [isPrivate, setIsPrivate] = useState(false);
-
-  // Screen time tracking
-  const [screenTime, setScreenTime] = useState({
-    today: 0,
-    thisWeek: 0,
-    thisMonth: 0
-  });
-  const [sessionStart, setSessionStart] = useState(Date.now());
+  const [form, setForm] = useState(defaultForm);
+  const [initialForm, setInitialForm] = useState(defaultForm);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
+    let alive = true;
+
+    const loadProfileData = async () => {
+      const userId = auth.currentUser?.uid;
+      if (!userId) {
+        navigate('/login');
+        return;
+      }
+
+      try {
+        const userDoc = await getDoc(doc(db, 'users', userId));
+        if (!alive) return;
+
+        if (userDoc.exists()) {
+          const data = userDoc.data();
+          const normalized = {
+            displayName: data.displayName || '',
+            username: data.username || '',
+            bio: data.bio || '',
+            isPrivate: data.isPrivate || false,
+            allowTags: data.allowTags ?? true,
+            showActivityStatus: data.showActivityStatus ?? true,
+            messagePermission: data.messagePermission || 'everyone'
+          };
+          setForm(normalized);
+          setInitialForm(normalized);
+        }
+      } catch (error) {
+        console.error('Error loading profile:', error);
+        alert('Failed to load profile data');
+      } finally {
+        if (alive) setLoading(false);
+      }
+    };
+
     loadProfileData();
 
-    // Track session time
-    const sessionStartTime = Date.now();
-    setSessionStart(sessionStartTime);
-
-    // Update screen time every minute
-    const interval = setInterval(() => {
-      updateScreenTime();
-    }, 60000); // Update every minute
-
-    // Save screen time when component unmounts
     return () => {
-      clearInterval(interval);
-      saveScreenTime();
+      alive = false;
     };
+  }, [navigate]);
+
+  const hasChanges = useMemo(
+    () => JSON.stringify(form) !== JSON.stringify(initialForm),
+    [form, initialForm]
+  );
+
+  const profileUrl = useMemo(() => {
+    if (typeof window === 'undefined') return '';
+    if (!auth.currentUser?.uid) return '';
+    return `${window.location.origin}/user-profile/${auth.currentUser.uid}`;
   }, []);
 
-  const loadProfileData = async () => {
-    const userId = auth.currentUser?.uid;
-    if (!userId) {
-      navigate('/login');
-      return;
-    }
+  const updateField = (key, value) => {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  };
 
+  const handleCopyProfileLink = async () => {
+    if (!profileUrl) return;
     try {
-      const userDoc = await getDoc(doc(db, 'users', userId));
-      if (userDoc.exists()) {
-        const data = userDoc.data();
-        setUserProfile(data);
-        setDisplayName(data.displayName || '');
-        setBio(data.bio || '');
-        setUsername(data.username || '');
-        setIsPrivate(data.isPrivate || false);
-
-        // Load screen time data
-        if (data.screenTime) {
-          setScreenTime(data.screenTime);
-        }
-      }
-    } catch (error) {
-      console.error('Error loading profile:', error);
-      alert('Failed to load profile data');
-    } finally {
-      setLoading(false);
+      await navigator.clipboard.writeText(profileUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      alert('Failed to copy profile link');
     }
   };
 
-  const updateScreenTime = () => {
-    const currentTime = Date.now();
-    const sessionDuration = Math.floor((currentTime - sessionStart) / 60000); // in minutes
-
-    setScreenTime(prev => ({
-      today: prev.today + sessionDuration,
-      thisWeek: prev.thisWeek + sessionDuration,
-      thisMonth: prev.thisMonth + sessionDuration
-    }));
-
-    setSessionStart(currentTime);
-  };
-
-  const saveScreenTime = async () => {
-    const userId = auth.currentUser?.uid;
-    if (!userId) return;
-
-    try {
-      updateScreenTime();
-      await setDoc(doc(db, 'users', userId), {
-        screenTime: screenTime,
-        lastActive: new Date().toISOString()
-      }, { merge: true });
-    } catch (error) {
-      console.error('Error saving screen time:', error);
-    }
+  const handleDiscard = () => {
+    setForm(initialForm);
   };
 
   const handleSaveProfile = async () => {
     const userId = auth.currentUser?.uid;
     if (!userId) return;
 
-    if (!displayName.trim()) {
+    if (!form.displayName.trim()) {
       alert('Display name cannot be empty');
       return;
     }
@@ -123,21 +120,19 @@ const ProfileSettingsPage = () => {
     try {
       setSaving(true);
 
-      await setDoc(doc(db, 'users', userId), {
-        displayName: displayName.trim(),
-        bio: bio.trim(),
-        username: username.trim(),
-        isPrivate: isPrivate
-      }, { merge: true });
+      const payload = {
+        displayName: form.displayName.trim(),
+        bio: form.bio.trim(),
+        username: form.username.trim(),
+        isPrivate: form.isPrivate,
+        allowTags: form.allowTags,
+        showActivityStatus: form.showActivityStatus,
+        messagePermission: form.messagePermission
+      };
 
-      setUserProfile(prev => ({
-        ...prev,
-        displayName: displayName.trim(),
-        bio: bio.trim(),
-        username: username.trim(),
-        isPrivate: isPrivate
-      }));
-
+      await setDoc(doc(db, 'users', userId), payload, { merge: true });
+      setInitialForm(payload);
+      setForm(payload);
       alert('Profile updated successfully!');
     } catch (error) {
       console.error('Error updating profile:', error);
@@ -147,22 +142,16 @@ const ProfileSettingsPage = () => {
     }
   };
 
-  const formatTime = (minutes) => {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-
-    if (hours > 0) {
-      return `${hours}h ${mins}m`;
-    }
-    return `${mins}m`;
-  };
-
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 flex items-center justify-center" style={{width: '100%', maxWidth: 'none'}}>
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-16 w-16 border-4 border-indigo-200 border-t-indigo-600 mb-4"></div>
-          <p className="text-indigo-600 font-medium">Loading settings...</p>
+      <div className="min-h-screen bg-gradient-to-b from-zinc-950 via-neutral-950 to-zinc-950 text-white" style={{ width: '100%', maxWidth: 'none' }}>
+        <div className="w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+          <div className="mx-auto max-w-4xl space-y-4">
+            <div className="h-16 rounded-2xl border border-slate-800 bg-slate-900/60 animate-pulse" />
+            <div className="h-56 rounded-3xl border border-slate-800 bg-slate-900/60 animate-pulse" />
+            <div className="h-56 rounded-3xl border border-slate-800 bg-slate-900/60 animate-pulse" />
+            <div className="h-44 rounded-3xl border border-slate-800 bg-slate-900/60 animate-pulse" />
+          </div>
         </div>
       </div>
     );
@@ -171,211 +160,248 @@ const ProfileSettingsPage = () => {
   return (
     <>
       <Helmet>
-        <title>Profile Settings | InstruMentor - Manage Your Account</title>
-        <meta name="description" content="Manage your InstruMentor profile settings. Update your bio, profile picture, privacy settings, and customize your musical profile." />
+        <title>Profile Settings | InstruMentor</title>
+        <meta name="description" content="Manage your InstruMentor profile settings, privacy, and visibility preferences." />
         <meta property="og:title" content="Profile Settings | InstruMentor" />
-        <meta property="og:description" content="Manage your InstruMentor profile settings and customize your musical profile." />
+        <meta property="og:description" content="Manage your InstruMentor profile settings and privacy." />
         <meta property="og:type" content="website" />
         <meta property="og:url" content={typeof window !== 'undefined' ? window.location.href : ''} />
         <meta name="twitter:card" content="summary" />
         <meta name="twitter:title" content="Profile Settings | InstruMentor" />
-        <meta name="twitter:description" content="Manage your InstruMentor profile settings." />
+        <meta name="twitter:description" content="Manage your InstruMentor profile settings and privacy." />
       </Helmet>
-      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50" style={{width: '100%', maxWidth: 'none'}}>
-      {/* Header */}
-      <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-2xl border-b border-indigo-100 shadow-lg shadow-indigo-100/50">
-        <div className="w-full px-4 sm:px-6 lg:px-8" style={{width: '100%', maxWidth: 'none'}}>
-          <div className="flex items-center justify-between h-20">
-            <div className="flex items-center gap-4">
-              <button
-                onClick={() => navigate('/profile')}
-                className="p-2 hover:bg-indigo-50 rounded-2xl transition-colors"
-              >
-                <ArrowLeft className="w-6 h-6 text-indigo-600" />
-              </button>
+
+      <div className="min-h-screen bg-gradient-to-b from-zinc-950 via-neutral-950 to-zinc-950 text-white" style={{ width: '100%', maxWidth: 'none' }}>
+        <header className="sticky top-0 z-50 border-b border-white/5 bg-zinc-950/80 backdrop-blur-2xl">
+          <div className="w-full px-4 sm:px-6 lg:px-8">
+            <div className="mx-auto flex h-16 sm:h-20 max-w-4xl items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-600 flex items-center justify-center">
-                  <Settings className="w-6 h-6 text-white" />
+                <button
+                  onClick={() => navigate('/profile')}
+                  className="rounded-2xl border border-white/10 bg-white/5 p-2.5 text-zinc-200 transition-colors hover:bg-white/10"
+                  aria-label="Back to profile"
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </button>
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-sky-300/30 bg-slate-900">
+                    <Settings className="h-5 w-5 text-sky-300" />
+                  </div>
+                  <div>
+                    <h1 className="text-base font-semibold text-zinc-100 sm:text-lg">Profile Settings</h1>
+                    <p className="text-xs text-zinc-500">Inspired by modern social apps</p>
+                  </div>
                 </div>
-                <h1 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
-                  Profile Settings
-                </h1>
               </div>
+
+              <button
+                onClick={handleSaveProfile}
+                disabled={saving || !hasChanges}
+                className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-sky-900/30 transition-colors hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {saving ? (
+                  <>
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Saving
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4" />
+                    Save
+                  </>
+                )}
+              </button>
             </div>
           </div>
-        </div>
-      </header>
+        </header>
 
-      {/* Main Content */}
-      <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
-        <div className="space-y-6">
-          {/* Profile Information Section */}
-          <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-xl border border-indigo-100 p-8">
-            <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3">
-              <User className="w-6 h-6 text-indigo-600" />
-              Profile Information
-            </h2>
+        <main className="w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+          <div className="mx-auto max-w-4xl space-y-5">
+            <section className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 sm:p-6">
+              <h2 className="mb-5 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-300">
+                <User className="h-4 w-4 text-sky-300" />
+                Account
+              </h2>
 
-            <div className="space-y-6">
-              {/* Display Name */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Display Name
-                </label>
-                <input
-                  type="text"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value.slice(0, 30))}
-                  placeholder="Your display name"
-                  maxLength={30}
-                  className="w-full px-4 py-3 bg-white border-2 border-indigo-100 rounded-2xl focus:outline-none focus:border-indigo-400 transition-all text-gray-900"
-                />
-                <p className="text-xs text-gray-500 mt-1">{displayName.length}/30 characters</p>
-              </div>
-
-              {/* Username */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Username
-                </label>
-                <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20))}
-                  placeholder="username"
-                  maxLength={20}
-                  className="w-full px-4 py-3 bg-white border-2 border-indigo-100 rounded-2xl focus:outline-none focus:border-indigo-400 transition-all text-gray-900"
-                />
-                <p className="text-xs text-gray-500 mt-1">Lowercase letters, numbers, and underscores only. {username.length}/20 characters</p>
-              </div>
-
-              {/* Bio */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Bio
-                </label>
-                <textarea
-                  value={bio}
-                  onChange={(e) => setBio(e.target.value.slice(0, 150))}
-                  placeholder="Tell others about yourself..."
-                  maxLength={150}
-                  rows={4}
-                  className="w-full px-4 py-3 bg-white border-2 border-indigo-100 rounded-2xl focus:outline-none focus:border-indigo-400 transition-all resize-none text-gray-900"
-                />
-                <p className="text-xs text-gray-500 mt-1">{bio.length}/150 characters</p>
-              </div>
-
-              {/* Email (Read-only) */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Email
-                </label>
-                <div className="flex items-center gap-3 px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-2xl">
-                  <Mail className="w-5 h-5 text-gray-400" />
-                  <span className="text-gray-600">{auth.currentUser?.email}</span>
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-400">Display Name</label>
+                  <input
+                    type="text"
+                    value={form.displayName}
+                    onChange={(e) => updateField('displayName', e.target.value.slice(0, 30))}
+                    placeholder="Your display name"
+                    maxLength={30}
+                    className="w-full rounded-2xl border border-slate-700 bg-slate-950/50 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-400/60 focus:outline-none"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">{form.displayName.length}/30</p>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">Email cannot be changed</p>
-              </div>
 
-              {/* Private Account Toggle */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Account Privacy
-                </label>
-                <div className="bg-white border-2 border-indigo-100 rounded-2xl p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-gray-900">Private Account</h3>
-                      <p className="text-sm text-gray-600 mt-1">
-                        {isPrivate
-                          ? 'Only approved followers can see your posts'
-                          : 'Anyone can see your posts'}
-                      </p>
-                    </div>
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-400">Username</label>
+                  <input
+                    type="text"
+                    value={form.username}
+                    onChange={(e) => updateField('username', e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 20))}
+                    placeholder="username"
+                    maxLength={20}
+                    className="w-full rounded-2xl border border-slate-700 bg-slate-950/50 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-400/60 focus:outline-none"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">Lowercase letters, numbers, underscore ({form.username.length}/20)</p>
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-400">Bio</label>
+                  <textarea
+                    value={form.bio}
+                    onChange={(e) => updateField('bio', e.target.value.slice(0, 150))}
+                    placeholder="Tell people what you play, teach, or learn..."
+                    rows={4}
+                    maxLength={150}
+                    className="w-full resize-none rounded-2xl border border-slate-700 bg-slate-950/50 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-400/60 focus:outline-none"
+                  />
+                  <p className="mt-1 text-xs text-slate-500">{form.bio.length}/150</p>
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-400">Email</label>
+                  <div className="flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-950/40 px-4 py-3 text-sm text-slate-300">
+                    <Mail className="h-4 w-4 text-slate-500" />
+                    <span>{auth.currentUser?.email}</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 sm:p-6">
+              <h2 className="mb-5 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-300">
+                <Shield className="h-4 w-4 text-sky-300" />
+                Privacy & Interactions
+              </h2>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between rounded-2xl border border-slate-700 bg-slate-950/40 px-4 py-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-100">Private account</p>
+                    <p className="text-xs text-slate-400">Only approved followers can view your media.</p>
+                  </div>
+                  <button
+                    onClick={() => updateField('isPrivate', !form.isPrivate)}
+                    className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${form.isPrivate ? 'bg-sky-600' : 'bg-slate-600'}`}
+                  >
+                    <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${form.isPrivate ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between rounded-2xl border border-slate-700 bg-slate-950/40 px-4 py-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-100">Allow tags</p>
+                    <p className="text-xs text-slate-400">People can tag you in posts and reels.</p>
+                  </div>
+                  <button
+                    onClick={() => updateField('allowTags', !form.allowTags)}
+                    className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${form.allowTags ? 'bg-sky-600' : 'bg-slate-600'}`}
+                  >
+                    <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${form.allowTags ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between rounded-2xl border border-slate-700 bg-slate-950/40 px-4 py-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-100">Show activity status</p>
+                    <p className="text-xs text-slate-400">Others can see when you are active.</p>
+                  </div>
+                  <button
+                    onClick={() => updateField('showActivityStatus', !form.showActivityStatus)}
+                    className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${form.showActivityStatus ? 'bg-sky-600' : 'bg-slate-600'}`}
+                  >
+                    <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${form.showActivityStatus ? 'translate-x-6' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+
+                <div className="rounded-2xl border border-slate-700 bg-slate-950/40 px-4 py-3">
+                  <p className="text-sm font-semibold text-slate-100">Who can message you</p>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
                     <button
-                      onClick={() => setIsPrivate(!isPrivate)}
-                      className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${
-                        isPrivate ? 'bg-indigo-600' : 'bg-gray-300'
-                      }`}
+                      onClick={() => updateField('messagePermission', 'everyone')}
+                      className={`rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${form.messagePermission === 'everyone' ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
                     >
-                      <span
-                        className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${
-                          isPrivate ? 'translate-x-7' : 'translate-x-1'
-                        }`}
-                      />
+                      Everyone
+                    </button>
+                    <button
+                      onClick={() => updateField('messagePermission', 'followers')}
+                      className={`rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${form.messagePermission === 'followers' ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+                    >
+                      Followers only
                     </button>
                   </div>
                 </div>
-                <p className="text-xs text-gray-500 mt-1">
-                  When your account is private, only people you approve can see your photos and videos
+              </div>
+            </section>
+
+            <section className="rounded-3xl border border-slate-800 bg-slate-900/70 p-5 sm:p-6">
+              <h2 className="mb-5 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-slate-300">
+                <Bell className="h-4 w-4 text-sky-300" />
+                Visibility & Sharing
+              </h2>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between rounded-2xl border border-slate-700 bg-slate-950/40 px-4 py-3">
+                  <div className="flex items-center gap-2 text-slate-200">
+                    {form.isPrivate ? <EyeOff className="h-4 w-4 text-slate-400" /> : <Eye className="h-4 w-4 text-slate-400" />}
+                    <span className="text-sm">{form.isPrivate ? 'Your profile is private' : 'Your profile is public'}</span>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-slate-700 bg-slate-950/40 px-4 py-3">
+                  <p className="mb-2 text-sm font-semibold text-slate-100">Profile link</p>
+                  <div className="flex items-center gap-2">
+                    <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-400">
+                      <LinkIcon className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{profileUrl || 'Not available'}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCopyProfileLink}
+                      disabled={!profileUrl}
+                      className="inline-flex items-center gap-1 rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      {copied ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <div className="sticky bottom-3 z-10 rounded-2xl border border-slate-700 bg-slate-900/95 p-3 backdrop-blur-xl">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-slate-400">
+                  {hasChanges ? 'You have unsaved changes.' : 'All changes are saved.'}
                 </p>
-              </div>
-
-              {/* Save Button */}
-              <div className="flex justify-end pt-4">
-                <button
-                  onClick={handleSaveProfile}
-                  disabled={saving}
-                  className="px-8 py-3 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-700 hover:via-purple-700 hover:to-pink-700 text-white rounded-2xl font-semibold transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  {saving ? (
-                    <>
-                      <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
-                      Saving...
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-5 h-5" />
-                      Save Changes
-                    </>
-                  )}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDiscard}
+                    disabled={!hasChanges || saving}
+                    className="rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+                  >
+                    Discard
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveProfile}
+                    disabled={!hasChanges || saving}
+                    className="rounded-xl bg-sky-600 px-4 py-2 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50"
+                  >
+                    {saving ? 'Saving...' : 'Save changes'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-
-          {/* Screen Time Section */}
-          <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-xl border border-indigo-100 p-8">
-            <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-3">
-              <Clock className="w-6 h-6 text-indigo-600" />
-              Screen Time
-            </h2>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {/* Today */}
-              <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-2xl p-6 border border-indigo-100">
-                <div className="text-sm font-semibold text-indigo-600 mb-2">Today</div>
-                <div className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-                  {formatTime(screenTime.today)}
-                </div>
-              </div>
-
-              {/* This Week */}
-              <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-2xl p-6 border border-purple-100">
-                <div className="text-sm font-semibold text-purple-600 mb-2">This Week</div>
-                <div className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
-                  {formatTime(screenTime.thisWeek)}
-                </div>
-              </div>
-
-              {/* This Month */}
-              <div className="bg-gradient-to-br from-pink-50 to-orange-50 rounded-2xl p-6 border border-pink-100">
-                <div className="text-sm font-semibold text-pink-600 mb-2">This Month</div>
-                <div className="text-3xl font-bold bg-gradient-to-r from-pink-600 to-orange-600 bg-clip-text text-transparent">
-                  {formatTime(screenTime.thisMonth)}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-6 p-4 bg-indigo-50 rounded-2xl border border-indigo-100">
-              <p className="text-sm text-indigo-700">
-                <strong>Note:</strong> Screen time is tracked while you're actively using InstruMentor. Data resets daily, weekly, and monthly.
-              </p>
-            </div>
-          </div>
-        </div>
+        </main>
       </div>
-    </div>
     </>
   );
 };

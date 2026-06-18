@@ -1,54 +1,30 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
-import { auth, db, getMessages, sendMessageRequest, acceptMessageRequest, rejectMessageRequest, getUserProfile, getPosts, getStoriesGroupedByUser } from '../firebase';
+import {
+  auth,
+  db,
+  sendMessageRequest,
+  acceptMessageRequest,
+  rejectMessageRequest,
+  getUserProfile,
+  getPosts,
+} from '../firebase';
 import { collection, onSnapshot, query, where, orderBy } from 'firebase/firestore';
-import { 
-  Mail, 
-  Send, 
-  Check, 
-  X, 
-  MessageCircle, 
-  User, 
-  Phone, 
-  Video, 
-  MoreVertical, 
-  UserX, 
-  Shield, 
-  MinusCircle,
-  Home,
-  Settings,
-  EyeOff,
-  Volume2,
-  VolumeX,
-  Maximize,
-  Minimize,
-  Grid3x3,
-  Maximize2,
-  Heart,
-  Play,
-  Camera
-} from 'lucide-react';
+import { Mail, Send, Check, X, MessageCircle, User, MoreVertical, Search, ArrowLeft, PlaySquare, PanelRightOpen, PanelRightClose } from 'lucide-react';
 
 const MessagesPage = () => {
   const navigate = useNavigate();
   const [conversations, setConversations] = useState([]);
   const [activeChat, setActiveChat] = useState(null);
-  const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
-  const [activeTab, setActiveTab] = useState('accepted');
+  const [activeTab, setActiveTab] = useState('accepted'); // accepted | pending
   const [showChatOptions, setShowChatOptions] = useState(false);
-  const [showFeedSidebar, setShowFeedSidebar] = useState(true); // Default to true for split view
-  const [viewMode, setViewMode] = useState('split'); // 'split', 'messages-only', 'feed-focus'
-  const [viewModeNotification, setViewModeNotification] = useState('');
-  const [feedPosts, setFeedPosts] = useState([]);
-  const [loadingFeed, setLoadingFeed] = useState(false);
-  const [stories, setStories] = useState({});
-  const [isInCall, setIsInCall] = useState(false);
-  const [callType, setCallType] = useState(null); // 'audio' or 'video'
-  const [callPeer, setCallPeer] = useState(null);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isVideoOff, setIsVideoOff] = useState(false);
+  const [threadQuery, setThreadQuery] = useState('');
+  const [showSocialPanel, setShowSocialPanel] = useState(false);
+  const [socialTab, setSocialTab] = useState('posts'); // posts | reels
+  const [socialLoading, setSocialLoading] = useState(false);
+  const [socialItems, setSocialItems] = useState([]);
   const currentUserId = auth.currentUser?.uid;
 
   // Close options menu when clicking elsewhere
@@ -62,13 +38,6 @@ const MessagesPage = () => {
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   }, [showChatOptions]);
-
-  // Load feed posts when sidebar is shown
-  useEffect(() => {
-    if (showFeedSidebar && viewMode === 'split') {
-      loadFeedPosts();
-    }
-  }, [showFeedSidebar, viewMode]);
 
   useEffect(() => {
     if (!currentUserId) return;
@@ -118,6 +87,13 @@ const MessagesPage = () => {
         })
       );
 
+      // Keep the most recently active threads first
+      conversationsWithUserInfo.sort((a, b) => {
+        const at = a.lastMessage?.timestamp?.toMillis?.() ?? 0;
+        const bt = b.lastMessage?.timestamp?.toMillis?.() ?? 0;
+        return bt - at;
+      });
+
       setConversations(conversationsWithUserInfo);
     });
 
@@ -141,104 +117,71 @@ const MessagesPage = () => {
     await acceptMessageRequest(messageId);
   };
 
-  const handleStartCall = (type) => {
-    if (!activeChat) return;
-    setCallType(type);
-    setCallPeer(activeChat.userInfo);
-    setIsInCall(true);
-    setShowChatOptions(false);
-    // In a real implementation, this would initiate WebRTC connection
-  };
+  const filteredConversations = useMemo(() => {
+    const q = threadQuery.trim().toLowerCase();
+    const byTab = conversations.filter((convo) => {
+      if (activeTab === 'accepted') return convo.status === 'accepted';
+      return convo.status === 'pending' && convo.lastMessage?.receiverId === currentUserId;
+    });
+    if (!q) return byTab;
+    return byTab.filter((convo) => {
+      const name = (convo.userInfo?.displayName || '').toLowerCase();
+      const last = (convo.lastMessage?.content || '').toLowerCase();
+      return name.includes(q) || last.includes(q);
+    });
+  }, [activeTab, conversations, currentUserId, threadQuery]);
 
-  const handleEndCall = () => {
-    setIsInCall(false);
-    setCallType(null);
-    setCallPeer(null);
-    setIsMuted(false);
-    setIsVideoOff(false);
-  };
+  const activeMessages = useMemo(() => {
+    if (!activeChat?.messages) return [];
+    return [...activeChat.messages].sort((a, b) => {
+      const at = a.timestamp?.toMillis?.() ?? 0;
+      const bt = b.timestamp?.toMillis?.() ?? 0;
+      return at - bt;
+    });
+  }, [activeChat]);
 
-  const handleRemoveFriend = async () => {
-    if (!activeChat) return;
-    // Implementation would remove from friends list
-    console.log('Remove friend:', activeChat.userId);
-    setShowChatOptions(false);
-  };
-
-  const handleBlockUser = async () => {
-    if (!activeChat) return;
-    // Implementation would block user
-    console.log('Block user:', activeChat.userId);
-    setShowChatOptions(false);
-  };
-
-  const toggleMute = () => {
-    setIsMuted(!isMuted);
-  };
-
-  const toggleVideo = () => {
-    setIsVideoOff(!isVideoOff);
-  };
-
-  const toggleViewMode = () => {
-    if (viewMode === 'split') {
-      setViewMode('messages-only');
-      setShowFeedSidebar(false);
-      setViewModeNotification('Switched to Messages Only view');
-    } else if (viewMode === 'messages-only') {
-      setViewMode('split');
-      setShowFeedSidebar(true);
-      setViewModeNotification('Switched to Split View (Messages + Feed)');
+  const visibleSocialItems = useMemo(() => {
+    if (socialTab === 'posts') {
+      return (socialItems || []).filter((p) => !p.mediaType || p.mediaType === 'post');
     }
-    
-    // Clear notification after 3 seconds
-    setTimeout(() => setViewModeNotification(''), 3000);
-  };
+    // reels / vibes: align with profile logic
+    return (socialItems || []).filter(
+      (p) =>
+        p.mediaType === 'reel' ||
+        (p.mediaType === 'video' && p.videoDuration && Number(p.videoDuration) <= 120)
+    );
+  }, [socialItems, socialTab]);
 
-  const focusOnFeed = () => {
-    setViewMode('feed-focus');
-    navigate('/home');
-  };
+  useEffect(() => {
+    if (!showSocialPanel) return;
+    let alive = true;
 
-  const loadFeedPosts = async () => {
-    if (loadingFeed) return;
-    setLoadingFeed(true);
-    try {
-      // Load posts
-      const posts = await getPosts(); // Get recent posts
-      const postsWithUserInfo = await Promise.all(
-        posts.slice(0, 8).map(async (post) => {
-          const postUser = await getUserProfile(post.userId);
-          return { ...post, userInfo: postUser };
-        })
-      );
-      setFeedPosts(postsWithUserInfo);
-      
-      // Load stories
-      const storiesData = await getStoriesGroupedByUser();
-      const storiesWithUserInfo = {};
-      for (const [userId, userStories] of Object.entries(storiesData)) {
-        const userInfo = await getUserProfile(userId);
-        storiesWithUserInfo[userId] = {
-          userInfo,
-          stories: userStories
-        };
+    const load = async () => {
+      setSocialLoading(true);
+      try {
+        const posts = await getPosts();
+        if (!alive) return;
+        const withUser = await Promise.all(
+          (posts || []).slice(0, 30).map(async (p) => {
+            const userInfo = await getUserProfile(p.userId);
+            return { ...p, userInfo };
+          })
+        );
+        if (!alive) return;
+        setSocialItems(withUser);
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.error('Failed to load social items', e);
+      } finally {
+        if (alive) setSocialLoading(false);
       }
-      setStories(storiesWithUserInfo);
-    } catch (error) {
-      console.error('Error loading feed content:', error);
-    } finally {
-      setLoadingFeed(false);
-    }
-  };
+    };
 
-  const filteredConversations = conversations.filter(convo => {
-    if (activeTab === 'accepted') {
-      return convo.status === 'accepted';
-    } else {
-      return convo.status === 'pending' && convo.lastMessage.receiverId === currentUserId;
-    }
-  });
+    load();
+    return () => {
+      alive = false;
+    };
+  }, [showSocialPanel]);
 
   return (
     <>
@@ -253,551 +196,447 @@ const MessagesPage = () => {
         <meta name="twitter:title" content="Messages | InstruMentor - Chat with Musicians" />
         <meta name="twitter:description" content="Connect and chat with musicians on InstruMentor. Send messages, share ideas, and collaborate." />
       </Helmet>
-      <div className="min-h-screen bg-gray-50" style={{width: '100%', maxWidth: 'none'}}>
-      {/* Header */}
-      <div className="bg-white shadow-sm">
-        <div className="w-full px-3 sm:px-4 py-3 sm:py-4" style={{width: '100%', maxWidth: 'none'}}>
-          <div className="flex justify-between items-center">
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-800 flex items-center gap-2">
-              <Mail className="w-5 h-5 sm:w-6 sm:h-6 text-purple-600" />
-              <span className="hidden sm:inline">Messages</span>
-            </h1>
-            <div className="flex items-center gap-2 sm:gap-3">
-              {/* View Mode Controls */}
-              <div className="hidden md:flex items-center gap-1 bg-gray-100 rounded-lg p-1">
+      <div
+        className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 text-slate-100"
+        style={{ width: '100%', maxWidth: 'none' }}
+      >
+        {/* Top bar */}
+        <header className="sticky top-0 z-40 border-b border-slate-800 bg-slate-950/70 backdrop-blur-xl">
+          <div className="w-full px-4 sm:px-6 py-4" style={{ width: '100%', maxWidth: 'none' }}>
+            <button
+              type="button"
+              onClick={() => navigate('/home')}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-sky-300/30 bg-slate-900/80 px-2.5 py-1.5 text-xs font-medium text-slate-200 transition-all duration-300 hover:border-sky-300/60 hover:bg-slate-800"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Back
+            </button>
+
+            <div className="mt-4 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="h-10 w-10 rounded-2xl bg-slate-900 border border-sky-400/20 flex items-center justify-center shrink-0">
+                  <Mail className="w-5 h-5 text-sky-300" />
+                </div>
+                <div className="min-w-0">
+                  <h1 className="text-lg sm:text-xl font-semibold tracking-tight truncate">Messages</h1>
+                  <p className="text-xs text-slate-400 truncate">Chat and handle message requests</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={toggleViewMode}
-                  className={`p-2 rounded-md transition-all flex items-center gap-2 text-sm font-medium ${
-                    viewMode === 'split' 
-                      ? 'bg-white text-purple-600 shadow-sm'
-                      : 'text-gray-600 hover:text-gray-800'
+                  type="button"
+                  onClick={() => setShowSocialPanel((v) => !v)}
+                  className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition-colors ${
+                    showSocialPanel
+                      ? 'border-sky-400/40 bg-sky-600/15 text-sky-200'
+                      : 'border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800'
                   }`}
-                  title={viewMode === 'split' ? 'Messages Only' : 'Split View'}
+                  aria-label={showSocialPanel ? 'Hide social panel' : 'Show social panel'}
                 >
-                  {viewMode === 'split' ? (
-                    <>
-                      <Maximize2 className="w-4 h-4" />
-                      <span className="hidden sm:inline">Split View</span>
-                    </>
-                  ) : (
-                    <>
-                      <Maximize className="w-4 h-4" />
-                      <span className="hidden sm:inline">Messages Only</span>
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={focusOnFeed}
-                  className="p-2 rounded-md text-gray-600 hover:text-gray-800 transition-all flex items-center gap-2 text-sm font-medium"
-                  title="Focus on Feed"
-                >
-                  <Home className="w-4 h-4" />
-                  <span className="hidden sm:inline">Feed Focus</span>
+                  {showSocialPanel ? <PanelRightClose className="w-4 h-4" /> : <PanelRightOpen className="w-4 h-4" />}
+                  <span className="hidden sm:inline">{showSocialPanel ? 'Hide Social' : 'Show Social'}</span>
+                  <span className="sm:hidden">Social</span>
                 </button>
               </div>
             </div>
-          </div>
 
-          {/* Tabs */}
-          <div className="flex gap-4 mt-4 border-b">
-            <button
-              onClick={() => setActiveTab('accepted')}
-              className={`pb-2 px-1 ${
-                activeTab === 'accepted'
-                  ? 'border-b-2 border-purple-600 text-purple-600 font-medium'
-                  : 'text-gray-600 hover:text-gray-800'
-              }`}
-            >
-              Conversations
-            </button>
-            <button
-              onClick={() => setActiveTab('pending')}
-              className={`pb-2 px-1 ${
-                activeTab === 'pending'
-                  ? 'border-b-2 border-purple-600 text-purple-600 font-medium'
-                  : 'text-gray-600 hover:text-gray-800'
-              }`}
-            >
-              Message Requests
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="w-full px-3 sm:px-4 py-4 sm:py-6">
-        <div className={`grid gap-3 sm:gap-6 h-[calc(100vh-12rem)] sm:h-[600px] ${
-          viewMode === 'messages-only'
-            ? 'grid-cols-1 md:grid-cols-3'
-            : viewMode === 'split' && showFeedSidebar
-              ? 'grid-cols-1 lg:grid-cols-5'
-              : 'grid-cols-1 md:grid-cols-3'
-        }`}>
-          {/* Conversations List */}
-          <div className={`bg-white rounded-lg shadow overflow-hidden ${
-            viewMode === 'messages-only'
-              ? 'md:col-span-1'
-              : viewMode === 'split' && showFeedSidebar 
-                ? 'lg:col-span-1'
-                : 'md:col-span-1'
-          }`}>
-            <div className="p-4 border-b">
-              <h2 className="font-semibold text-gray-800">
-                {activeTab === 'accepted' ? 'Conversations' : 'Pending Requests'}
-              </h2>
+            {/* Tabs */}
+            <div className="mt-4 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveTab('accepted')}
+                className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                  activeTab === 'accepted'
+                    ? 'bg-slate-800 text-sky-300'
+                    : 'text-slate-300 hover:bg-slate-900'
+                }`}
+              >
+                Conversations
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('pending')}
+                className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                  activeTab === 'pending'
+                    ? 'bg-slate-800 text-sky-300'
+                    : 'text-slate-300 hover:bg-slate-900'
+                }`}
+              >
+                Requests
+              </button>
             </div>
-            <div className="overflow-y-auto h-full">
-              {filteredConversations.length === 0 ? (
-                <div className="p-8 text-center text-gray-500">
-                  <MessageCircle className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-                  <p>{activeTab === 'accepted' ? 'No conversations yet' : 'No pending requests'}</p>
+          </div>
+        </header>
+
+        {/* Two-pane layout */}
+        <main className="w-full px-4 sm:px-6 py-5" style={{ width: '100%', maxWidth: 'none' }}>
+          <div className="mx-auto max-w-7xl grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 min-h-[calc(100vh-180px)]">
+            {/* Threads */}
+            <aside className="lg:col-span-4 xl:col-span-4">
+              <div className="rounded-3xl border border-slate-800 bg-slate-900/70 backdrop-blur-xl shadow-2xl shadow-black/30 overflow-hidden">
+                <div className="p-4 border-b border-slate-800">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                    <input
+                      type="search"
+                      value={threadQuery}
+                      onChange={(e) => setThreadQuery(e.target.value)}
+                      placeholder="Search people or messages…"
+                      className="w-full rounded-2xl border border-slate-700 bg-slate-950/40 px-9 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-sky-400/50 focus:ring-2 focus:ring-sky-500/20"
+                    />
+                  </div>
                 </div>
-              ) : (
-                filteredConversations.map((convo) => (
-                  <div
-                    key={convo.userId}
-                    onClick={() => setActiveChat(convo)}
-                    className={`p-4 border-b cursor-pointer hover:bg-gray-50 ${
-                      activeChat?.userId === convo.userId ? 'bg-purple-50' : ''
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      {convo.userInfo?.profilePic ? (
-                        <img
-                          src={convo.userInfo.profilePic}
-                          alt={convo.userInfo.displayName}
-                          className="w-12 h-12 rounded-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-12 h-12 rounded-full bg-purple-200 flex items-center justify-center">
-                          <User className="w-6 h-6 text-purple-600" />
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-medium text-gray-800 truncate">
-                          {convo.userInfo?.displayName || 'Unknown User'}
-                        </h3>
-                        <p className="text-sm text-gray-600 truncate">
-                          {convo.lastMessage.content}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {convo.lastMessage.timestamp?.toDate?.()?.toLocaleDateString() || 'Recently'}
-                        </p>
-                      </div>
-                      {activeTab === 'pending' && (
-                        <div className="flex gap-1">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleAcceptRequest(convo.lastMessage.id);
-                            }}
-                            className="p-1 bg-green-100 text-green-600 rounded hover:bg-green-200"
-                          >
-                            <Check className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              rejectMessageRequest(convo.lastMessage.id);
-                            }}
-                            className="p-1 bg-red-100 text-red-600 rounded hover:bg-red-200"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                      )}
+
+                <div className="max-h-[calc(100vh-310px)] lg:max-h-[calc(100vh-250px)] overflow-y-auto">
+                  {filteredConversations.length === 0 ? (
+                    <div className="p-10 text-center">
+                      <MessageCircle className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+                      <p className="text-slate-300 font-semibold">
+                        {activeTab === 'accepted' ? 'No conversations yet' : 'No requests right now'}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-400">
+                        {activeTab === 'accepted'
+                          ? 'Start by messaging a musician from their profile.'
+                          : 'When someone messages you, requests will appear here.'}
+                      </p>
+                    </div>
+                  ) : (
+                    filteredConversations.map((convo) => {
+                      const selected = activeChat?.userId === convo.userId;
+                      return (
+                        <button
+                          key={convo.userId}
+                          type="button"
+                          onClick={() => {
+                            setActiveChat(convo);
+                            setShowChatOptions(false);
+                          }}
+                          className={`w-full text-left px-4 py-4 border-b border-slate-800 transition-colors ${
+                            selected ? 'bg-slate-800/60' : 'hover:bg-slate-800/40'
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            {convo.userInfo?.profilePic ? (
+                              <img
+                                src={convo.userInfo.profilePic}
+                                alt={convo.userInfo.displayName}
+                                className="w-11 h-11 rounded-2xl object-cover border border-slate-700"
+                              />
+                            ) : (
+                              <div className="w-11 h-11 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center">
+                                <User className="w-5 h-5 text-slate-300" />
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="font-semibold text-slate-100 truncate">
+                                  {convo.userInfo?.displayName || 'Unknown user'}
+                                </p>
+                                <p className="text-xs text-slate-500 shrink-0">
+                                  {convo.lastMessage?.timestamp?.toDate?.()?.toLocaleDateString?.() || ''}
+                                </p>
+                              </div>
+                              <p className="mt-1 text-sm text-slate-400 truncate">
+                                {convo.lastMessage?.content || ''}
+                              </p>
+                              {activeTab === 'pending' && (
+                                <div className="mt-3 flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleAcceptRequest(convo.lastMessage.id);
+                                    }}
+                                    className="inline-flex items-center gap-2 rounded-xl bg-emerald-600/15 border border-emerald-400/30 px-3 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-600/25 transition-colors"
+                                  >
+                                    <Check className="w-4 h-4" />
+                                    Accept
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      rejectMessageRequest(convo.lastMessage.id);
+                                    }}
+                                    className="inline-flex items-center gap-2 rounded-xl bg-red-600/10 border border-red-400/30 px-3 py-2 text-sm font-semibold text-red-200 hover:bg-red-600/20 transition-colors"
+                                  >
+                                    <X className="w-4 h-4" />
+                                    Decline
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </aside>
+
+            {/* Chat */}
+            <section className={showSocialPanel ? 'lg:col-span-5 xl:col-span-5' : 'lg:col-span-8 xl:col-span-8'}>
+              <div className="rounded-3xl border border-slate-800 bg-slate-900/70 backdrop-blur-xl shadow-2xl shadow-black/30 overflow-hidden flex flex-col min-h-[520px]">
+                {!activeChat ? (
+                  <div className="flex-1 flex items-center justify-center p-10 text-center">
+                    <div>
+                      <MessageCircle className="w-14 h-14 text-slate-600 mx-auto mb-3" />
+                      <p className="text-slate-200 font-semibold">Pick a conversation</p>
+                      <p className="mt-1 text-sm text-slate-400">Select a thread on the left to start chatting.</p>
                     </div>
                   </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Chat Area */}
-          <div className={`bg-white rounded-lg shadow overflow-hidden flex flex-col ${
-            viewMode === 'messages-only'
-              ? 'md:col-span-2'
-              : viewMode === 'split' && showFeedSidebar 
-                ? 'lg:col-span-2'
-                : 'md:col-span-2'
-          }`}>
-            {activeChat ? (
-              <>
-                {/* Chat Header */}
-                <div className="p-4 border-b bg-gray-50">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      {activeChat.userInfo?.profilePic ? (
-                        <img
-                          src={activeChat.userInfo.profilePic}
-                          alt={activeChat.userInfo.displayName}
-                          className="w-10 h-10 rounded-full object-cover"
-                        />
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-purple-200 flex items-center justify-center">
-                          <User className="w-5 h-5 text-purple-600" />
+                ) : (
+                  <>
+                    {/* Chat header */}
+                    <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        {activeChat.userInfo?.profilePic ? (
+                          <img
+                            src={activeChat.userInfo.profilePic}
+                            alt={activeChat.userInfo.displayName}
+                            className="w-10 h-10 rounded-2xl object-cover border border-slate-700"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center">
+                            <User className="w-5 h-5 text-slate-300" />
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <p className="font-semibold text-slate-100 truncate">
+                            {activeChat.userInfo?.displayName || 'Unknown user'}
+                          </p>
+                          <p className="text-xs text-slate-400 truncate">
+                            {activeChat.status === 'accepted' ? 'Conversation' : 'Request'}
+                          </p>
                         </div>
-                      )}
-                      <div>
-                        <h3 className="font-semibold text-gray-800">
-                          {activeChat.userInfo?.displayName || 'Unknown User'}
-                        </h3>
-                        <p className="text-sm text-green-500">Online</p>
                       </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-2">
-                      {/* Browse Feed Button */}
-                      <button
-                        onClick={() => {
-                          if (viewMode === 'messages-only') {
-                            setViewMode('split');
-                            setShowFeedSidebar(true);
-                          } else {
-                            setShowFeedSidebar(!showFeedSidebar);
-                          }
-                        }}
-                        className={`p-2 rounded-full transition-colors ${
-                          showFeedSidebar && viewMode === 'split'
-                            ? 'text-purple-600 bg-purple-50'
-                            : 'text-gray-600 hover:text-purple-600 hover:bg-purple-50'
-                        }`}
-                        title={showFeedSidebar && viewMode === 'split' ? 'Hide Feed' : 'Browse Feed'}
-                      >
-                        <Home className="w-5 h-5" />
-                      </button>
-                      
-                      {/* Audio Call Button */}
-                      <button
-                        onClick={() => handleStartCall('audio')}
-                        className="p-2 text-gray-600 hover:text-green-600 hover:bg-green-50 rounded-full transition-colors"
-                        title="Audio Call"
-                      >
-                        <Phone className="w-5 h-5" />
-                      </button>
-                      
-                      {/* Video Call Button */}
-                      <button
-                        onClick={() => handleStartCall('video')}
-                        className="p-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-full transition-colors"
-                        title="Video Call"
-                      >
-                        <Video className="w-5 h-5" />
-                      </button>
-                      
-                      {/* Options Menu */}
-                      <div className="relative options-menu">
+
+                      <div className="flex items-center gap-2">
+                        <div className="relative options-menu">
                         <button
+                          type="button"
                           onClick={() => setShowChatOptions(!showChatOptions)}
-                          className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-full transition-colors"
+                          className="p-2 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 transition-colors"
+                          aria-label="Chat options"
                         >
-                          <MoreVertical className="w-5 h-5" />
+                          <MoreVertical className="w-5 h-5 text-slate-200" />
                         </button>
-                        
+
                         {showChatOptions && (
-                          <div className="absolute right-0 top-full mt-2 bg-white rounded-lg shadow-lg border py-2 z-10 min-w-48">
+                          <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl shadow-black/50 overflow-hidden z-10">
                             <button
-                              onClick={handleRemoveFriend}
-                              className="w-full px-4 py-2 text-left text-orange-600 hover:bg-orange-50 flex items-center gap-2"
+                              type="button"
+                              onClick={() => {
+                                setActiveChat(null);
+                                setShowChatOptions(false);
+                              }}
+                              className="w-full px-4 py-3 text-left text-sm font-semibold text-slate-200 hover:bg-slate-800 transition-colors"
                             >
-                              <MinusCircle className="w-4 h-4" />
-                              Remove Friend
-                            </button>
-                            <button
-                              onClick={handleBlockUser}
-                              className="w-full px-4 py-2 text-left text-red-600 hover:bg-red-50 flex items-center gap-2"
-                            >
-                              <Shield className="w-4 h-4" />
-                              Block User
+                              Close chat
                             </button>
                           </div>
                         )}
                       </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Messages */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                  {activeChat.messages.map((msg) => (
-                    <div
-                      key={msg.id}
-                      className={`flex ${msg.senderId === currentUserId ? 'justify-end' : 'justify-start'}`}
-                    >
-                      <div
-                        className={`max-w-xs md:max-w-md px-4 py-2 rounded-lg ${
-                          msg.senderId === currentUserId
-                            ? 'bg-purple-600 text-white'
-                            : 'bg-gray-200 text-gray-800'
-                        }`}
-                      >
-                        <p>{msg.content}</p>
-                        <p className={`text-xs mt-1 ${
-                          msg.senderId === currentUserId ? 'text-purple-200' : 'text-gray-500'
-                        }`}>
-                          {msg.timestamp?.toDate?.()?.toLocaleTimeString() || 'Just now'}
-                        </p>
                       </div>
                     </div>
-                  ))}
-                </div>
 
-                {/* Message Input */}
-                {activeChat.status === 'accepted' ? (
-                  <div className="p-4 border-t">
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={newMessage}
-                        onChange={(e) => setNewMessage(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                        placeholder="Type a message..."
-                        className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:border-purple-500"
-                      />
-                      <button
-                        onClick={handleSendMessage}
-                        className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg"
-                      >
-                        <Send className="w-5 h-5" />
-                      </button>
+                    {/* Messages */}
+                    <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+                      {activeMessages.map((msg) => {
+                        const mine = msg.senderId === currentUserId;
+                        return (
+                          <div key={msg.id} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
+                            <div
+                              className={`max-w-[80%] sm:max-w-[70%] rounded-2xl px-4 py-2.5 border ${
+                                mine
+                                  ? 'bg-sky-600/20 border-sky-400/30 text-slate-100'
+                                  : 'bg-slate-800/70 border-slate-700 text-slate-100'
+                              }`}
+                            >
+                              <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                              <p className={`mt-1 text-[11px] ${mine ? 'text-sky-200/80' : 'text-slate-400'}`}>
+                                {msg.timestamp?.toDate?.()?.toLocaleTimeString?.() || ''}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  </div>
-                ) : (
-                  <div className="p-4 border-t bg-yellow-50 text-center">
-                    <p className="text-yellow-800">Accept this message request to start chatting</p>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div className="flex items-center justify-center h-full text-gray-500">
-                <div className="text-center">
-                  <MessageCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                  <p>Select a conversation to start chatting</p>
-                </div>
-              </div>
-            )}
-          </div>
-          
-          {/* Feed Sidebar */}
-          {viewMode === 'split' && showFeedSidebar && (
-            <div className="lg:col-span-2 bg-white rounded-lg shadow overflow-hidden">
-              <div className="p-4 border-b bg-purple-50">
-                <h3 className="font-semibold text-gray-800">Browse Feed</h3>
-              </div>
-              <div className="overflow-y-auto h-full">
-                {/* Stories Section */}
-                {Object.keys(stories).length > 0 && (
-                  <div className="p-4 border-b">
-                    <h4 className="text-sm font-medium text-gray-600 mb-3">Stories</h4>
-                    <div className="flex gap-3 overflow-x-auto scrollbar-hide">
-                      {Object.entries(stories).slice(0, 5).map(([userId, storyData]) => (
-                        <div key={userId} className="flex-shrink-0 text-center">
-                          <button className="relative w-12 h-12 rounded-full p-0.5 bg-gradient-to-r from-purple-500 via-pink-500 to-red-500 hover:scale-105 transition-transform">
-                            {storyData.userInfo?.profilePic ? (
-                              <img
-                                src={storyData.userInfo.profilePic}
-                                alt={storyData.userInfo.displayName}
-                                className="w-full h-full rounded-full object-cover border border-white"
-                              />
-                            ) : (
-                              <div className="w-full h-full rounded-full bg-purple-200 flex items-center justify-center border border-white">
-                                <User className="w-4 h-4 text-purple-600" />
-                              </div>
-                            )}
+
+                    {/* Composer */}
+                    {activeChat.status === 'accepted' ? (
+                      <div className="p-4 border-t border-slate-800">
+                        <div className="flex items-end gap-2">
+                          <textarea
+                            value={newMessage}
+                            onChange={(e) => setNewMessage(e.target.value)}
+                            placeholder="Write a message…"
+                            rows={1}
+                            className="flex-1 resize-none rounded-2xl border border-slate-700 bg-slate-950/40 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-sky-400/50 focus:ring-2 focus:ring-sky-500/20"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                handleSendMessage();
+                              }
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={handleSendMessage}
+                            disabled={!newMessage.trim()}
+                            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-900/30 hover:bg-sky-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            aria-label="Send message"
+                          >
+                            <Send className="w-4 h-4" />
+                            <span className="hidden sm:inline">Send</span>
                           </button>
-                          <p className="text-xs text-gray-600 mt-1 truncate w-12">
-                            {storyData.userInfo?.displayName?.split(' ')[0] || 'User'}
-                          </p>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                
-                {/* Posts Section */}
-                <div className="p-4">
-                {loadingFeed ? (
-                  <div className="flex items-center justify-center py-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {feedPosts.length === 0 ? (
-                      <div className="text-center py-8 text-gray-500">
-                        <MessageCircle className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-                        <p className="text-sm">No posts available</p>
                       </div>
                     ) : (
-                      feedPosts.map((post) => (
-                        <div key={post.id} className="bg-gray-50 rounded-lg p-4 hover:bg-gray-100 transition-colors cursor-pointer"
-                             onClick={() => navigate(`/user-profile/${post.userId}`)}>
-                          <div className="flex items-center gap-3 mb-3">
-                            {post.userInfo?.profilePic ? (
-                              <img
-                                src={post.userInfo.profilePic}
-                                alt={post.userInfo.displayName}
-                                className="w-8 h-8 rounded-full object-cover"
-                              />
-                            ) : (
-                              <div className="w-8 h-8 rounded-full bg-purple-200 flex items-center justify-center">
-                                <User className="w-4 h-4 text-purple-600" />
-                              </div>
-                            )}
-                            <div>
-                              <p className="font-medium text-sm text-gray-800">
-                                {post.userInfo?.displayName || post.userName || 'Unknown User'}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                {post.timestamp?.toDate?.()?.toLocaleDateString() || 'Recently'}
-                              </p>
-                            </div>
-                          </div>
-                          <p className="text-sm text-gray-700 mb-2" 
-                             style={{
-                               display: '-webkit-box',
-                               WebkitLineClamp: 3,
-                               WebkitBoxOrient: 'vertical',
-                               overflow: 'hidden'
-                             }}>
-                            {post.content}
-                          </p>
-                          {post.mediaUrl && (
-                            <img
-                              src={post.mediaUrl}
-                              alt="Post media"
-                              className="w-full rounded-lg mt-2 max-h-32 object-cover"
-                            />
-                          )}
-                          <div className="flex items-center gap-4 mt-3 text-xs text-gray-500">
-                            <div className="flex items-center gap-1">
-                              <Heart className="w-3 h-3" />
-                              <span>{post.likes?.length || 0}</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <MessageCircle className="w-3 h-3" />
-                              <span>{post.comments?.length || 0}</span>
-                            </div>
-                          </div>
-                        </div>
-                      ))
+                      <div className="p-4 border-t border-slate-800 bg-slate-950/30">
+                        <p className="text-sm text-slate-300 text-center">
+                          Accept the request from the left to start chatting.
+                        </p>
+                      </div>
                     )}
-                    
-                    <div className="text-center py-4">
-                      <button
-                        onClick={() => navigate('/home')}
-                        className="text-purple-600 hover:text-purple-700 text-sm font-medium"
-                      >
-                        View Full Feed →
-                      </button>
-                    </div>
-                  </div>
+                  </>
                 )}
-                </div>
               </div>
-            </div>
-          )}
-        </div>
-      </div>
-      
-      {/* View Mode Notification */}
-      {viewModeNotification && (
-        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-purple-600 text-white px-6 py-3 rounded-lg shadow-lg z-40 transition-all">
-          <div className="flex items-center gap-2">
-            <Grid3x3 className="w-5 h-5" />
-            <span className="font-medium">{viewModeNotification}</span>
-          </div>
-        </div>
-      )}
-      
-      {/* Call Interface */}
-      {isInCall && (
-        <div className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full">
-            {/* Call Header */}
-            <div className="p-6 text-center">
-              {callPeer?.profilePic ? (
-                <img
-                  src={callPeer.profilePic}
-                  alt={callPeer.displayName}
-                  className="w-24 h-24 rounded-full object-cover mx-auto mb-4"
-                />
-              ) : (
-                <div className="w-24 h-24 rounded-full bg-purple-200 flex items-center justify-center mx-auto mb-4">
-                  <User className="w-12 h-12 text-purple-600" />
+            </section>
+
+            {/* Social panel (desktop) */}
+            <aside className={`hidden lg:block lg:col-span-3 xl:col-span-3 ${showSocialPanel ? '' : 'pointer-events-none'}`}>
+              <div
+                className={`rounded-3xl border border-slate-800 bg-slate-900/70 backdrop-blur-xl shadow-2xl shadow-black/30 overflow-hidden min-h-[520px] flex flex-col transition-all duration-300 ${
+                  showSocialPanel ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4'
+                }`}
+              >
+                <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+                  <div>
+                    <p className="font-semibold text-slate-100">Social</p>
+                    <p className="text-xs text-slate-400">Browse posts & reels</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowSocialPanel(false)}
+                    className="p-2 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 transition-colors"
+                    aria-label="Close social panel"
+                  >
+                    <X className="w-5 h-5 text-slate-200" />
+                  </button>
                 </div>
-              )}
-              <h2 className="text-xl font-semibold text-gray-800 mb-2">
-                {callPeer?.displayName || 'Unknown User'}
-              </h2>
-              <p className="text-gray-600">
-                {callType === 'video' ? 'Video Call' : 'Audio Call'} • 00:42
-              </p>
-            </div>
-            
-            {/* Video Area for Video Calls */}
-            {callType === 'video' && (
-              <div className="px-6 pb-4">
-                <div className="bg-gray-900 rounded-lg aspect-video flex items-center justify-center">
-                  {isVideoOff ? (
-                    <div className="text-white text-center">
-                      <EyeOff className="w-12 h-12 mx-auto mb-2" />
-                      <p>Video is off</p>
+
+                <div className="p-4 border-b border-slate-800 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSocialTab('posts')}
+                    className={`flex-1 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                      socialTab === 'posts' ? 'bg-slate-800 text-sky-300' : 'text-slate-300 hover:bg-slate-900'
+                    }`}
+                  >
+                    Posts
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSocialTab('reels')}
+                    className={`flex-1 px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${
+                      socialTab === 'reels' ? 'bg-slate-800 text-sky-300' : 'text-slate-300 hover:bg-slate-900'
+                    }`}
+                  >
+                    Reels
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4">
+                  {socialLoading ? (
+                    <div className="py-12 text-center text-slate-400">
+                      <div className="mx-auto h-10 w-10 rounded-full border-b-2 border-sky-500 animate-spin" />
+                      <p className="mt-3 text-sm">Loading…</p>
+                    </div>
+                  ) : visibleSocialItems.length === 0 ? (
+                    <div className="py-12 text-center text-slate-400">
+                      <PlaySquare className="w-10 h-10 text-slate-600 mx-auto mb-3" />
+                      <p className="text-sm">Nothing here yet.</p>
+                    </div>
+                  ) : socialTab === 'reels' ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      {visibleSocialItems.slice(0, 16).map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => navigate('/home')}
+                          className="group relative overflow-hidden rounded-2xl border border-slate-700 bg-slate-950/30 hover:bg-slate-800/40 transition-colors"
+                          title="Open in feed"
+                        >
+                          {p.imageUrl ? (
+                            <img src={p.imageUrl} alt="Reel" className="h-28 w-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
+                          ) : (
+                            <div className="h-28 w-full flex items-center justify-center text-slate-500">
+                              <PlaySquare className="w-6 h-6" />
+                            </div>
+                          )}
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </button>
+                      ))}
                     </div>
                   ) : (
-                    <div className="text-white text-center">
-                      <Video className="w-12 h-12 mx-auto mb-2" />
-                      <p>Video call active</p>
+                    <div className="space-y-3">
+                      {visibleSocialItems.slice(0, 12).map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => navigate(`/post/${p.id}`)}
+                          className="w-full text-left rounded-2xl border border-slate-700 bg-slate-950/30 hover:bg-slate-800/40 transition-colors p-3"
+                        >
+                          <div className="flex items-start gap-3">
+                            {p.userInfo?.profilePic ? (
+                              <img src={p.userInfo.profilePic} alt={p.userInfo.displayName} className="w-10 h-10 rounded-2xl object-cover border border-slate-700" />
+                            ) : (
+                              <div className="w-10 h-10 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center">
+                                <User className="w-5 h-5 text-slate-300" />
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-sm font-semibold text-slate-100 truncate">
+                                  {p.userInfo?.displayName || 'User'}
+                                </p>
+                                <p className="text-[11px] text-slate-500">
+                                  {p.timestamp?.toDate?.()?.toLocaleDateString?.() || ''}
+                                </p>
+                              </div>
+                              <p className="mt-1 text-sm text-slate-300 line-clamp-2">{p.content || ''}</p>
+                              {p.imageUrl && (
+                                <div className="mt-2 overflow-hidden rounded-xl border border-slate-700 bg-slate-900/60">
+                                  <img
+                                    src={p.imageUrl}
+                                    alt="Post preview"
+                                    className="h-24 w-full object-cover"
+                                    loading="lazy"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => navigate('/home')}
+                        className="w-full rounded-2xl border border-slate-700 bg-slate-900 px-4 py-3 text-sm font-semibold text-sky-300 hover:bg-slate-800 transition-colors"
+                      >
+                        Open full feed
+                      </button>
                     </div>
                   )}
                 </div>
               </div>
-            )}
-            
-            {/* Call Controls */}
-            <div className="p-6 border-t">
-              <div className="flex justify-center gap-4">
-                {/* Mute Button */}
-                <button
-                  onClick={toggleMute}
-                  className={`p-3 rounded-full transition-colors ${
-                    isMuted 
-                      ? 'bg-red-100 text-red-600 hover:bg-red-200' 
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
-                  title={isMuted ? 'Unmute' : 'Mute'}
-                >
-                  {isMuted ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
-                </button>
-                
-                {/* Video Toggle (for video calls) */}
-                {callType === 'video' && (
-                  <button
-                    onClick={toggleVideo}
-                    className={`p-3 rounded-full transition-colors ${
-                      isVideoOff 
-                        ? 'bg-red-100 text-red-600 hover:bg-red-200' 
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                    }`}
-                    title={isVideoOff ? 'Turn on video' : 'Turn off video'}
-                  >
-                    {isVideoOff ? <EyeOff className="w-6 h-6" /> : <Video className="w-6 h-6" />}
-                  </button>
-                )}
-                
-                {/* End Call Button */}
-                <button
-                  onClick={handleEndCall}
-                  className="p-3 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
-                  title="End Call"
-                >
-                  <Phone className="w-6 h-6 transform rotate-[135deg]" />
-                </button>
-              </div>
-            </div>
+            </aside>
           </div>
-        </div>
-      )}
-    </div>
+        </main>
+      </div>
     </>
   );
 };

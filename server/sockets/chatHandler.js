@@ -49,7 +49,7 @@ export const registerChatHandlers = (io, socket) => {
             // We need to find the socket ID of the recipient.
             // We can use io.in(roomId).fetchSockets() but that's expensive for every msg.
             // We can assume recipient is in the room.
-            // Redis adapter handles broadcasting to rooms, but for specific socket ID it works across nodes usually.
+            // Broadcast to a specific socket in the room.
 
             // Optimization: Look up participant in state
             const recipient = participants.find(p => p.userId === recipientId);

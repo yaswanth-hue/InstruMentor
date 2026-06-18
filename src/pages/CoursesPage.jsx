@@ -1,352 +1,429 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
-  auth,
-  createCourse,
-  getCourses,
-  getEnrolledCourses,
-  enrollInCourse,
-  unenrollFromCourse,
+  auth, createCourse, getCourses, getEnrolledCourses,
+  enrollInCourse, unenrollFromCourse,
 } from '../firebase';
-import { BookOpen, PlusCircle, UserPlus, Users, GraduationCap, Award, TrendingUp, Sparkles } from 'lucide-react';
+import {
+  BookOpen, PlusCircle, UserPlus, UserMinus, Users, GraduationCap,
+  Award, Compass, Search, Sparkles, ArrowRight, ArrowLeft, Library,
+  X, ChevronRight, Clock,
+} from 'lucide-react';
 
+const TAB_KEYS = ['explore', 'my', 'enrolled'];
+const TAB_CONFIG = {
+  explore:  { label: 'Explore',   Icon: Compass,       headline: 'Discover courses',         sub: 'Browse and enroll in community courses.' },
+  my:       { label: 'My Courses', Icon: Award,         headline: 'Your teaching studio',     sub: 'Courses you host — manage content and students.' },
+  enrolled: { label: 'Enrolled',   Icon: Library,       headline: 'Continue learning',        sub: 'Every course you have joined.' },
+};
+
+const ACCENTS = [
+  { from: 'from-sky-600',    to: 'to-cyan-600',    dot: 'bg-sky-400'    },
+  { from: 'from-violet-600', to: 'to-blue-600',    dot: 'bg-violet-400' },
+  { from: 'from-teal-600',   to: 'to-emerald-600', dot: 'bg-teal-400'   },
+  { from: 'from-blue-600',   to: 'to-indigo-600',  dot: 'bg-blue-400'   },
+];
+
+/* ── Skeleton card ─────────────────────────────────────────────────────────── */
+const SkeletonCard = () => (
+  <div className="rounded-2xl border border-slate-700/50 bg-slate-900/60 overflow-hidden animate-pulse">
+    <div className="h-1.5 bg-slate-700" />
+    <div className="p-5 space-y-3">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-slate-800" />
+        <div className="flex-1 space-y-2">
+          <div className="h-4 bg-slate-800 rounded w-3/5" />
+          <div className="h-3 bg-slate-800 rounded w-2/5" />
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <div className="h-3 bg-slate-800 rounded" />
+        <div className="h-3 bg-slate-800 rounded w-4/5" />
+      </div>
+      <div className="h-9 bg-slate-800 rounded-xl" />
+    </div>
+  </div>
+);
+
+/* ── Course card ───────────────────────────────────────────────────────────── */
+const CourseCard = ({ course, index, userId, isEnrolledFn, onEnroll, onUnenroll }) => {
+  const navigate   = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const isMine     = course.creatorId === userId;
+  const enrolled   = isEnrolledFn(course.id);
+  const accent     = ACCENTS[index % ACCENTS.length];
+  const nStudents  = course.enrolledUsers?.length || 0;
+
+  const openCourse = () => navigate(`/course/${course.id}`);
+
+  const enroll = async (e) => {
+    e.stopPropagation();
+    setBusy(true);
+    await onEnroll(course.id);
+    setBusy(false);
+  };
+
+  const unenroll = async (e) => {
+    e.stopPropagation();
+    setBusy(true);
+    await onUnenroll(course.id);
+    setBusy(false);
+  };
+
+  return (
+    <article
+      onClick={openCourse}
+      className="group relative rounded-2xl border border-slate-700/50 bg-slate-900/70 hover:border-slate-600 hover:bg-slate-900 transition-all duration-300 overflow-hidden cursor-pointer hover:-translate-y-0.5 hover:shadow-xl hover:shadow-black/40"
+      style={{ animation: `fadeInUp 0.4s ease-out ${index * 0.06}s backwards` }}
+    >
+      {/* top accent bar */}
+      <div className={`h-1 bg-gradient-to-r ${accent.from} ${accent.to}`} />
+
+      <div className="p-5">
+        {/* header */}
+        <div className="flex items-start gap-3 mb-3">
+          <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${accent.from} ${accent.to} flex items-center justify-center shrink-0 shadow-lg group-hover:scale-105 transition-transform duration-300`}>
+            <BookOpen className="w-5 h-5 text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="font-bold text-slate-100 text-sm sm:text-base leading-snug line-clamp-2 group-hover:text-sky-300 transition-colors duration-200">
+              {course.title}
+            </h2>
+            <div className="flex flex-wrap items-center gap-2 mt-1">
+              {isMine && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 border border-amber-400/20 px-2 py-0.5 text-xs font-semibold text-amber-300">
+                  <Award className="w-3 h-3" /> Creator
+                </span>
+              )}
+              {enrolled && !isMine && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 text-xs font-semibold text-emerald-300">
+                  Enrolled
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* description */}
+        <p className="text-slate-400 text-xs sm:text-sm leading-relaxed line-clamp-2 mb-4">
+          {course.description || 'Explore this course and enhance your skills!'}
+        </p>
+
+        {/* footer */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+            <Users className="w-3.5 h-3.5" />
+            <span>{nStudents} student{nStudents !== 1 ? 's' : ''}</span>
+          </div>
+
+          <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+            {/* Unenroll (enrolled non-creator) */}
+            {enrolled && !isMine && (
+              <button
+                onClick={unenroll}
+                disabled={busy}
+                className="flex items-center gap-1.5 rounded-xl border border-slate-600 hover:border-red-400/50 hover:bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-slate-400 hover:text-red-300 transition-all duration-200 disabled:opacity-50"
+              >
+                <UserMinus className="w-3.5 h-3.5" />
+                Leave
+              </button>
+            )}
+
+            {/* Enroll (not enrolled, not creator) */}
+            {!enrolled && !isMine && (
+              <button
+                onClick={enroll}
+                disabled={busy}
+                className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 px-3 py-1.5 text-xs font-semibold text-white shadow-md shadow-sky-900/20 transition-all duration-200 disabled:opacity-50"
+              >
+                {busy
+                  ? <div className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                  : <UserPlus className="w-3.5 h-3.5" />}
+                Enroll
+              </button>
+            )}
+
+            {/* Open (enrolled or creator) */}
+            <button
+              onClick={openCourse}
+              className="flex items-center gap-1 rounded-xl border border-slate-700 hover:border-sky-500/50 hover:bg-sky-500/5 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-sky-300 transition-all duration-200"
+            >
+              {isMine ? 'Manage' : 'Open'}
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+};
+
+/* ── Page ──────────────────────────────────────────────────────────────────── */
 const CoursesPage = () => {
   const navigate = useNavigate();
-  const [userId, setUserId] = useState(null);
-  const [tab, setTab] = useState('explore'); // explore | my | enrolled
-  const [courses, setCourses] = useState([]);
-  const [myCourses, setMyCourses] = useState([]);
-  const [enrolled, setEnrolled] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
-  const [title, setTitle] = useState('');
+  const [userId,      setUserId]      = useState(null);
+  const [tab,         setTab]         = useState('explore');
+  const [courses,     setCourses]     = useState([]);
+  const [myCourses,   setMyCourses]   = useState([]);
+  const [enrolled,    setEnrolled]    = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [showCreate,  setShowCreate]  = useState(false);
+  const [title,       setTitle]       = useState('');
   const [description, setDescription] = useState('');
+  const [search,      setSearch]      = useState('');
+  const [creating,    setCreating]    = useState(false);
 
-  // Listen to auth state changes
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUserId(user?.uid || null);
-    });
-    return unsubscribe;
+    const unsub = onAuthStateChanged(auth, u => setUserId(u?.uid || null));
+    return unsub;
   }, []);
 
   useEffect(() => {
     const load = async () => {
-      if (!userId) {
-        setLoading(false);
-        return;
-      }
+      if (!userId) { setLoading(false); return; }
       setLoading(true);
       try {
         const [all, mine, myEnroll] = await Promise.all([
-          getCourses(),
-          getCourses(userId),
-          getEnrolledCourses(userId),
+          getCourses(), getCourses(userId), getEnrolledCourses(userId),
         ]);
-        setCourses(all);
-        setMyCourses(mine);
-        setEnrolled(myEnroll);
-      } catch (error) {
-        console.error('Error loading courses:', error);
-      } finally {
-        setLoading(false);
-      }
+        setCourses(all); setMyCourses(mine); setEnrolled(myEnroll);
+      } catch (e) { console.error(e); }
+      finally { setLoading(false); }
     };
     load();
   }, [userId]);
 
+  useEffect(() => {
+    if (!showCreate) return;
+    const fn = e => { if (e.key === 'Escape') setShowCreate(false); };
+    window.addEventListener('keydown', fn);
+    return () => window.removeEventListener('keydown', fn);
+  }, [showCreate]);
+
   const handleCreate = async () => {
     if (!title.trim()) return;
-    const id = await createCourse({
-      title,
-      description,
-      creatorId: userId,
-    });
-    setShowCreate(false);
-    setTitle('');
-    setDescription('');
-    navigate(`/course/${id}`);
+    setCreating(true);
+    try {
+      const id = await createCourse({ title, description, creatorId: userId });
+      setShowCreate(false); setTitle(''); setDescription('');
+      navigate(`/course/${id}`);
+    } finally { setCreating(false); }
   };
 
-  const handleEnroll = async (courseId) => {
+  const handleEnroll = async courseId => {
     if (!userId) return;
     await enrollInCourse(courseId, userId);
-    const updated = await getEnrolledCourses(userId);
-    setEnrolled(updated);
+    setEnrolled(await getEnrolledCourses(userId));
   };
 
-  const handleUnenroll = async (courseId) => {
+  const handleUnenroll = async courseId => {
     if (!userId) return;
     await unenrollFromCourse(courseId, userId);
-    const updated = await getEnrolledCourses(userId);
-    setEnrolled(updated);
+    setEnrolled(await getEnrolledCourses(userId));
   };
 
-  const isEnrolled = (courseId) => enrolled.some((c) => c.id === courseId);
+  const isEnrolledFn = id => enrolled.some(c => c.id === id);
 
-  // Filter out user's own courses from explore tab
-  const list = tab === 'explore'
-    ? courses.filter(course => course.creatorId !== userId)
-    : tab === 'my'
-    ? myCourses
-    : enrolled;
+  const list = useMemo(() => {
+    if (tab === 'explore') return courses.filter(c => c.creatorId !== userId);
+    if (tab === 'my')      return myCourses;
+    return enrolled;
+  }, [tab, courses, myCourses, enrolled, userId]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(c =>
+      (c.title || '').toLowerCase().includes(q) ||
+      (c.description || '').toLowerCase().includes(q)
+    );
+  }, [list, search]);
+
+  const goTab = useCallback(id => { if (TAB_KEYS.includes(id)) setTab(id); }, []);
+  const cfg    = TAB_CONFIG[tab];
+  const TabIcon = cfg.Icon;
+
+  const empty = useMemo(() => {
+    if (search.trim()) return { title: 'No matches', hint: 'Try a different keyword.', action: () => setSearch(''), actionLabel: 'Clear search' };
+    if (tab === 'explore')  return { title: 'Nothing here yet', hint: 'Be the first to publish a course.', action: () => setShowCreate(true), actionLabel: 'Create a course' };
+    if (tab === 'my')       return { title: 'No courses yet', hint: 'Launch your first course.', action: () => setShowCreate(true), actionLabel: 'Create your first course' };
+    return { title: 'Not enrolled anywhere', hint: 'Browse the catalog and join a course.', action: () => goTab('explore'), actionLabel: 'Browse courses' };
+  }, [tab, search]);
 
   return (
     <>
       <Helmet>
-        <title>Courses | InstruMentor - Learn & Teach Music</title>
-        <meta name="description" content="Discover music courses on InstruMentor. Learn from talented musicians, enroll in courses, or create your own to teach others. Master your instrument today!" />
-        <meta property="og:title" content="Courses | InstruMentor - Learn & Teach Music" />
-        <meta property="og:description" content="Discover music courses on InstruMentor. Learn from talented musicians, enroll in courses, or create your own to teach others." />
-        <meta property="og:type" content="website" />
-        <meta property="og:url" content={typeof window !== 'undefined' ? window.location.href : ''} />
-        <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content="Courses | InstruMentor - Learn & Teach Music" />
-        <meta name="twitter:description" content="Discover music courses on InstruMentor. Learn from talented musicians or create your own courses to teach others." />
+        <title>Courses | InstruMentor</title>
       </Helmet>
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50" style={{width: '100%', maxWidth: 'none'}}>
-      {/* Header with gradient background */}
-      <div className="bg-gradient-to-r from-purple-600 via-pink-500 to-blue-500 shadow-lg">
-        <div className="w-full px-4 sm:px-6 py-5 sm:py-6 flex items-center justify-between" style={{width: '100%', maxWidth: 'none'}}>
-          <h1 className="text-2xl sm:text-3xl font-bold text-white flex items-center gap-3">
-            <div className="bg-white/20 backdrop-blur-sm p-2 rounded-xl">
-              <GraduationCap className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
-            </div>
-            <span className="drop-shadow-md">Discover Courses</span>
-          </h1>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setShowCreate(true)}
-              className="bg-white text-purple-600 hover:bg-purple-50 px-4 py-2.5 sm:px-5 sm:py-3 rounded-xl flex items-center gap-2 text-sm sm:text-base font-semibold shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105"
-            >
-              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5" />
-              <span className="hidden sm:inline">Create Course</span>
-              <span className="sm:hidden">Create</span>
+
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 text-slate-100" style={{ width: '100%', maxWidth: 'none' }}>
+
+        {/* ── Header ── */}
+        <div className="relative overflow-hidden border-b border-slate-800/80">
+          <div className="pointer-events-none absolute -top-24 -right-24 w-80 h-80 rounded-full bg-sky-600/8 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-16 -left-16 w-64 h-64 rounded-full bg-violet-600/6 blur-3xl" />
+
+          <div className="relative w-full px-4 sm:px-6 py-5 sm:py-7" style={{ width: '100%', maxWidth: 'none' }}>
+            <button onClick={() => navigate('/')}
+              className="mb-4 inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-slate-600 hover:text-slate-100 transition-all duration-200 group">
+              <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform duration-200" />
+              Back
             </button>
-          </div>
-        </div>
 
-        {/* Tab Navigation with modern design */}
-        <div className="w-full px-4 sm:px-6 pb-0 flex gap-2 sm:gap-4 overflow-x-auto" style={{width: '100%', maxWidth: 'none'}}>
-          <button
-            className={`pb-4 px-4 font-semibold transition-all duration-300 ${
-              tab === 'explore'
-                ? 'text-white border-b-4 border-white'
-                : 'text-white/70 hover:text-white border-b-4 border-transparent'
-            }`}
-            onClick={() => setTab('explore')}
-          >
-            <div className="flex items-center gap-2">
-              <TrendingUp className="w-4 h-4" />
-              Explore
-            </div>
-          </button>
-          <button
-            className={`pb-4 px-4 font-semibold transition-all duration-300 ${
-              tab === 'my'
-                ? 'text-white border-b-4 border-white'
-                : 'text-white/70 hover:text-white border-b-4 border-transparent'
-            }`}
-            onClick={() => setTab('my')}
-          >
-            <div className="flex items-center gap-2">
-              <Award className="w-4 h-4" />
-              My Courses
-            </div>
-          </button>
-          <button
-            className={`pb-4 px-4 font-semibold transition-all duration-300 ${
-              tab === 'enrolled'
-                ? 'text-white border-b-4 border-white'
-                : 'text-white/70 hover:text-white border-b-4 border-transparent'
-            }`}
-            onClick={() => setTab('enrolled')}
-          >
-            <div className="flex items-center gap-2">
-              <BookOpen className="w-4 h-4" />
-              Enrolled
-            </div>
-          </button>
-        </div>
-      </div>
-
-      {/* Main Content Area */}
-      <div className="w-full px-4 sm:px-6 py-6 sm:py-8" style={{width: '100%', maxWidth: 'none'}}>
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-16">
-            <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-purple-600"></div>
-            <p className="mt-4 text-gray-600 font-medium">Loading amazing courses...</p>
-          </div>
-        ) : list.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16">
-            <div className="bg-white rounded-full p-6 shadow-lg mb-4">
-              <BookOpen className="w-16 h-16 text-gray-400" />
-            </div>
-            <p className="text-xl text-gray-600 font-medium">No courses found</p>
-            <p className="text-gray-500 mt-2">
-              {tab === 'explore' ? 'Start creating some courses!' : 'Nothing here yet'}
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
-            {list.map((course, index) => (
-              <div
-                key={course.id}
-                className="group bg-white rounded-2xl shadow-md hover:shadow-2xl transition-all duration-500 overflow-hidden border border-gray-100 hover:border-purple-200 hover:-translate-y-2"
-                style={{
-                  animation: `fadeInUp 0.5s ease-out ${index * 0.1}s backwards`
-                }}
-              >
-                {/* Course Header with Gradient */}
-                <div className="h-32 bg-gradient-to-br from-purple-400 via-pink-400 to-blue-400 relative overflow-hidden">
-                  <div className="absolute inset-0 bg-black/10"></div>
-                  <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm px-3 py-1.5 rounded-full flex items-center gap-2 shadow-lg">
-                    <Users className="w-4 h-4 text-purple-600" />
-                    <span className="text-sm font-bold text-gray-800">
-                      {course.enrolledUsers?.length || 0}
-                    </span>
-                  </div>
-                  {/* Decorative elements */}
-                  <div className="absolute bottom-0 left-0 w-full h-8 bg-white rounded-t-3xl"></div>
+            <div className="flex items-start justify-between gap-4 mb-6">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-sky-600/30 to-cyan-600/30 border border-sky-500/20 flex items-center justify-center shrink-0">
+                  <TabIcon className="w-6 h-6 text-sky-300" />
                 </div>
-
-                {/* Course Content */}
-                <div className="p-5 pt-2">
-                  <div className="flex items-start gap-3 mb-3">
-                    <div className="bg-gradient-to-br from-purple-500 to-pink-500 p-2.5 rounded-xl shadow-md group-hover:scale-110 transition-transform duration-300">
-                      <BookOpen className="w-5 h-5 text-white" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-lg font-bold text-gray-800 group-hover:text-purple-600 transition-colors duration-300 line-clamp-2">
-                        {course.title}
-                      </h3>
-                    </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Courses</span>
+                    <span className="text-xs text-slate-600">·</span>
+                    <span className="text-xs text-slate-500">{loading ? '…' : `${list.length}`}</span>
                   </div>
-
-                  <p className="text-gray-600 text-sm leading-relaxed line-clamp-3 mb-4">
-                    {course.description || 'Explore this amazing course and enhance your skills!'}
-                  </p>
-
-                  {/* Stats Bar */}
-                  <div className="flex items-center gap-3 mb-4 p-3 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl">
-                    <div className="flex items-center gap-2 text-sm">
-                      <div className="bg-purple-100 p-1.5 rounded-lg">
-                        <Users className="w-4 h-4 text-purple-600" />
-                      </div>
-                      <div>
-                        <p className="text-xs text-gray-500">Students</p>
-                        <p className="font-bold text-purple-600">
-                          {course.enrolledUsers?.length || 0}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => navigate(`/course/${course.id}`)}
-                      className="flex-1 px-4 py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 font-medium text-gray-700 transition-all duration-300 hover:shadow-md"
-                    >
-                      View Details
-                    </button>
-                    {course.creatorId === userId ? (
-                      <div className="bg-gradient-to-r from-amber-100 to-yellow-100 px-4 py-2.5 rounded-xl flex items-center gap-2">
-                        <Award className="w-4 h-4 text-amber-600" />
-                        <span className="text-xs font-semibold text-amber-700">Creator</span>
-                      </div>
-                    ) : isEnrolled(course.id) ? (
-                      <button
-                        onClick={() => handleUnenroll(course.id)}
-                        className="px-4 py-2.5 rounded-xl bg-white border-2 border-gray-300 hover:border-red-300 hover:bg-red-50 font-medium text-gray-700 hover:text-red-600 transition-all duration-300"
-                      >
-                        Leave
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => handleEnroll(course.id)}
-                        className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-medium flex items-center gap-2 transition-all duration-300 hover:shadow-lg hover:scale-105"
-                      >
-                        <UserPlus className="w-4 h-4" />
-                        <span className="text-sm">Enroll</span>
-                      </button>
-                    )}
-                  </div>
+                  <h1 className="text-xl sm:text-2xl font-bold text-slate-50">{cfg.headline}</h1>
+                  <p className="text-slate-400 text-sm mt-0.5 hidden sm:block">{cfg.sub}</p>
                 </div>
               </div>
-            ))}
+
+              <button onClick={() => setShowCreate(true)}
+                className="shrink-0 flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-sky-900/25 transition-all duration-200">
+                <Sparkles className="w-4 h-4" />
+                <span className="hidden sm:inline">Create Course</span>
+                <span className="sm:hidden">Create</span>
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex gap-1 overflow-x-auto scrollbar-hide">
+              {TAB_KEYS.map(key => {
+                const { label, Icon: TIcon } = TAB_CONFIG[key];
+                const active = tab === key;
+                return (
+                  <button key={key} onClick={() => goTab(key)}
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all duration-200 ${
+                      active
+                        ? 'bg-sky-500/15 border border-sky-500/30 text-sky-300'
+                        : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50'
+                    }`}
+                  >
+                    <TIcon className="w-3.5 h-3.5" />
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        )}
+        </div>
+
+        {/* ── Body ── */}
+        <div className="w-full px-4 sm:px-6 py-5 sm:py-6" style={{ width: '100%', maxWidth: 'none' }}>
+          {/* Search */}
+          <div className="relative mb-5">
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+            <input
+              type="search"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search courses…"
+              className="w-full rounded-xl border border-slate-700 bg-slate-900/80 py-2.5 pl-10 pr-4 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500/60 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition"
+            />
+          </div>
+
+          {/* Grid */}
+          {loading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {[1,2,3,4,5,6].map(i => <SkeletonCard key={i} />)}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-slate-700/60 bg-slate-900/60 p-10 sm:p-16 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center mb-4">
+                <BookOpen className="w-7 h-7 text-slate-500" />
+              </div>
+              <p className="font-bold text-slate-200 text-lg mb-1">{empty.title}</p>
+              <p className="text-slate-400 text-sm mb-6 max-w-xs">{empty.hint}</p>
+              <button onClick={empty.action}
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-sky-900/20 transition-all duration-200">
+                {empty.actionLabel} <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filtered.map((course, i) => (
+                <CourseCard
+                  key={course.id}
+                  course={course}
+                  index={i}
+                  userId={userId}
+                  isEnrolledFn={isEnrolledFn}
+                  onEnroll={handleEnroll}
+                  onUnenroll={handleUnenroll}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
+      {/* ── Create modal ── */}
       {showCreate && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-slideUp">
-            {/* Modal Header */}
-            <div className="bg-gradient-to-r from-purple-600 to-pink-600 p-6">
-              <div className="flex items-center gap-3">
-                <div className="bg-white/20 backdrop-blur-sm p-2 rounded-xl">
-                  <Sparkles className="w-6 h-6 text-white" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-slate-700 bg-slate-900 shadow-2xl shadow-black/60 overflow-hidden">
+            {/* modal header */}
+            <div className="flex items-center justify-between px-6 py-5 border-b border-slate-700/60">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center">
+                  <Sparkles className="w-4 h-4 text-sky-400" />
                 </div>
-                <h2 className="text-2xl font-bold text-white">Create New Course</h2>
+                <h2 className="font-bold text-slate-100">Create New Course</h2>
               </div>
+              <button onClick={() => setShowCreate(false)}
+                className="p-1.5 rounded-xl hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-colors">
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
-            {/* Modal Body */}
             <div className="p-6 space-y-4">
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Course Title
-                </label>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Course Title *</label>
                 <input
                   value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Enter an engaging course title..."
-                  className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:border-purple-500 focus:outline-none transition-colors duration-300"
+                  onChange={e => setTitle(e.target.value)}
+                  placeholder="e.g. Beginner Guitar Fundamentals"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500/60 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition"
                 />
               </div>
-
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Course Description
-                </label>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Description</label>
                 <textarea
                   value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Describe what students will learn..."
+                  onChange={e => setDescription(e.target.value)}
+                  placeholder="What will students learn?"
                   rows={4}
-                  className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 focus:border-purple-500 focus:outline-none resize-none transition-colors duration-300"
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500/60 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition resize-none"
                 />
               </div>
-
-              <div className="flex justify-end gap-3 pt-4">
-                <button
-                  onClick={() => setShowCreate(false)}
-                  className="px-6 py-2.5 rounded-xl bg-gray-100 hover:bg-gray-200 font-medium text-gray-700 transition-all duration-300"
-                >
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => setShowCreate(false)}
+                  className="flex-1 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 py-2.5 text-sm font-semibold text-slate-300 transition-colors">
                   Cancel
                 </button>
-                <button
-                  onClick={handleCreate}
-                  disabled={!title.trim()}
-                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold shadow-lg hover:shadow-xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  <PlusCircle className="w-5 h-5" />
-                  Create Course
+                <button onClick={handleCreate} disabled={!title.trim() || creating}
+                  className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 disabled:opacity-50 py-2.5 text-sm font-semibold text-white shadow-lg shadow-sky-900/20 transition-all duration-200">
+                  {creating
+                    ? <div className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                    : <PlusCircle className="w-4 h-4" />}
+                  {creating ? 'Creating…' : 'Create Course'}
                 </button>
               </div>
             </div>
           </div>
         </div>
       )}
-    </div>
     </>
   );
 };
 
 export default CoursesPage;
-
-
-

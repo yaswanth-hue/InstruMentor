@@ -1,432 +1,329 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { 
-  auth, 
-  db,
-  getUserProfile, 
-  createMeeting, 
-  getMeetings,
-  enrollInCourse 
-} from '../firebase';
-import { 
-  doc, 
-  getDoc, 
-  updateDoc, 
-  arrayUnion,
-  arrayRemove 
-} from 'firebase/firestore';
+import { auth, db, getUserProfile, getMeetings, enrollInCourse } from '../firebase';
+import { doc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 import {
-  BookOpen,
-  Users,
-  Calendar,
-  Video,
-  Plus,
-  Clock,
-  User,
-  ArrowLeft,
-  Edit,
-  FileText,
-  ExternalLink,
-  BarChart3,
-  PlayCircle,
-  GraduationCap,
-  Award,
-  Sparkles,
-  TrendingUp,
-  UserPlus,
-  Download,
-  Link as LinkIcon
+  BookOpen, Users, Calendar, Video, ArrowLeft, BarChart3,
+  GraduationCap, Sparkles, UserPlus, FileText, Check, AlertCircle
 } from 'lucide-react';
-import CourseProgressDashboard from '../components/CourseProgressDashboard';
-import CourseContentHub from '../components/CourseContentHub';
+import CourseProgressDashboard  from '../components/CourseProgressDashboard';
+import CourseContentHub         from '../components/CourseContentHub';
+import CourseMeetingScheduler   from '../components/CourseMeetingScheduler';
 
+/* ─── helpers ──────────────────────────────────────────────────────────── */
+const fmtMonth = raw => {
+  const d = raw?.toDate ? raw.toDate() : new Date(raw);
+  return isNaN(d) ? '—' : d.toLocaleDateString([], { month: 'short', year: 'numeric' });
+};
+
+/* ─── Stat card ─────────────────────────────────────────────────────────── */
+const Stat = ({ icon: Icon, value, label, accent }) => {
+  const a = {
+    sky:     'bg-sky-500/10 border-sky-500/20 text-sky-400',
+    violet:  'bg-violet-500/10 border-violet-500/20 text-violet-400',
+    emerald: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400',
+    amber:   'bg-amber-500/10 border-amber-500/20 text-amber-400',
+  }[accent] || 'bg-slate-700 border-slate-600 text-slate-400';
+  return (
+    <div className="flex items-center gap-3 rounded-2xl border border-slate-700/60 bg-slate-900/50 px-3 py-3 sm:px-4">
+      <div className={`w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 ${a}`}>
+        <Icon className="w-4 h-4" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-base sm:text-lg font-bold text-slate-100 leading-none truncate">{value}</p>
+        <p className="text-xs text-slate-500 mt-0.5">{label}</p>
+      </div>
+    </div>
+  );
+};
+
+/* ─── Tab button ────────────────────────────────────────────────────────── */
+const Tab = ({ id, label, icon: Icon, active, onClick }) => (
+  <button
+    onClick={() => onClick(id)}
+    className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-5 py-3.5 text-xs sm:text-sm font-semibold border-b-2 whitespace-nowrap transition-all duration-200 ${
+      active
+        ? 'border-sky-400 text-sky-300'
+        : 'border-transparent text-slate-500 hover:text-slate-300 hover:border-slate-600'
+    }`}
+  >
+    <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+    <span>{label}</span>
+  </button>
+);
+
+/* ─── Page ──────────────────────────────────────────────────────────────── */
 const CoursePage = () => {
   const { courseId } = useParams();
-  const navigate = useNavigate();
-  const [course, setCourse] = useState(null);
-  const [meetings, setMeetings] = useState([]);
+  const navigate     = useNavigate();
+
+  const [course,         setCourse]         = useState(null);
+  const [meetings,       setMeetings]       = useState([]);
   const [creatorProfile, setCreatorProfile] = useState(null);
-  const [isEnrolled, setIsEnrolled] = useState(false);
-  const [isCreator, setIsCreator] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('overview');
-  
+  const [isEnrolled,     setIsEnrolled]     = useState(false);
+  const [isCreator,      setIsCreator]      = useState(false);
+  const [loading,        setLoading]        = useState(true);
+  const [enrolling,      setEnrolling]      = useState(false);
+  const [enrollError,    setEnrollError]    = useState('');
+  const [activeTab,      setActiveTab]      = useState('overview');
+
   const currentUserId = auth.currentUser?.uid;
 
-  useEffect(() => {
-    loadCourseData();
-  }, [courseId, currentUserId]);
+  useEffect(() => { if (courseId) load(); }, [courseId, currentUserId]);
 
-  const loadCourseData = async () => {
-    if (!courseId) return;
-
+  const load = async () => {
     try {
       setLoading(true);
-      
-      // Load course details
-      const courseDoc = await getDoc(doc(db, 'courses', courseId));
-      if (!courseDoc.exists()) {
-        navigate('/courses');
-        return;
-      }
-
-      const courseData = { id: courseDoc.id, ...courseDoc.data() };
-      setCourse(courseData);
-
-      // Load creator profile
-      const creator = await getUserProfile(courseData.creatorId);
-      setCreatorProfile(creator);
-
-      // Check if user is enrolled or creator
-      const enrolled = courseData.enrolledUsers?.includes(currentUserId) || false;
-      const creator_check = courseData.creatorId === currentUserId;
+      const snap = await getDoc(doc(db, 'courses', courseId));
+      if (!snap.exists()) { navigate('/courses'); return; }
+      const data = { id: snap.id, ...snap.data() };
+      setCourse(data);
+      setCreatorProfile(await getUserProfile(data.creatorId));
+      const enrolled = data.enrolledUsers?.includes(currentUserId) || false;
+      const creator  = data.creatorId === currentUserId;
       setIsEnrolled(enrolled);
-      setIsCreator(creator_check);
-
-      // Load meetings if enrolled or creator
-      if (enrolled || creator_check) {
-        const courseMeetings = await getMeetings(courseId);
-        setMeetings(courseMeetings);
-      }
-
-    } catch (error) {
-      console.error('Error loading course:', error);
-    } finally {
-      setLoading(false);
-    }
+      setIsCreator(creator);
+      if (enrolled || creator) setMeetings(await getMeetings(courseId));
+    } catch (e) {
+      console.error(e);
+    } finally { setLoading(false); }
   };
 
   const handleEnroll = async () => {
+    setEnrolling(true); setEnrollError('');
     try {
-      const courseRef = doc(db, 'courses', courseId);
-      await updateDoc(courseRef, {
-        enrolledUsers: arrayUnion(currentUserId)
-      });
+      await updateDoc(doc(db, 'courses', courseId), { enrolledUsers: arrayUnion(currentUserId) });
       setIsEnrolled(true);
-      loadCourseData(); // Reload to get meetings
-    } catch (error) {
-      console.error('Error enrolling:', error);
-      alert('Failed to enroll in course');
-    }
+      await load();
+    } catch { setEnrollError('Failed to enroll. Please try again.'); }
+    finally { setEnrolling(false); }
   };
 
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center" style={{width: '100%', maxWidth: 'none'}}>
-        <div className="flex flex-col items-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-purple-600"></div>
-          <p className="mt-4 text-gray-600 font-medium">Loading course...</p>
-        </div>
+  /* ── Loading ── */
+  if (loading) return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 flex items-center justify-center" style={{ width: '100%', maxWidth: 'none' }}>
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-10 h-10 rounded-full border-2 border-sky-500/30 border-t-sky-500 animate-spin" />
+        <p className="text-slate-400 text-sm">Loading course…</p>
       </div>
-    );
-  }
+    </div>
+  );
 
-  if (!course) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center" style={{width: '100%', maxWidth: 'none'}}>
-        <div className="text-center">
-          <div className="bg-white rounded-full p-6 shadow-lg mb-4 inline-block">
-            <BookOpen className="w-16 h-16 text-gray-400" />
-          </div>
-          <h2 className="text-2xl font-bold text-gray-700 mb-2">Course not found</h2>
-          <button
-            onClick={() => navigate('/courses')}
-            className="mt-4 px-6 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold hover:shadow-lg transition-all duration-300"
-          >
-            Back to Courses
-          </button>
+  /* ── Not found ── */
+  if (!course) return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 flex items-center justify-center p-4" style={{ width: '100%', maxWidth: 'none' }}>
+      <div className="text-center">
+        <div className="w-16 h-16 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center mx-auto mb-4">
+          <BookOpen className="w-8 h-8 text-slate-500" />
         </div>
+        <h2 className="text-xl font-bold text-slate-200 mb-4">Course not found</h2>
+        <button onClick={() => navigate('/courses')}
+          className="px-6 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold transition-colors">
+          Back to Courses
+        </button>
       </div>
-    );
-  }
+    </div>
+  );
+
+  const tabs = [
+    { id: 'overview',  label: 'Overview',  icon: BookOpen   },
+    { id: 'content',   label: 'Content',   icon: Video      },
+    ...(isEnrolled || isCreator ? [
+      { id: 'meetings', label: 'Meetings', icon: Calendar   },
+      { id: 'progress', label: 'Progress', icon: BarChart3  },
+    ] : []),
+  ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50" style={{width: '100%', maxWidth: 'none'}}>
-      {/* Hero Header with Gradient */}
-      <div className="bg-gradient-to-r from-purple-600 via-pink-500 to-blue-500 shadow-lg relative overflow-hidden">
-        {/* Decorative background elements */}
-        <div className="absolute inset-0 bg-black/10"></div>
-        <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full blur-3xl"></div>
-        <div className="absolute bottom-0 left-0 w-96 h-96 bg-white/10 rounded-full blur-3xl"></div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 text-slate-100" style={{ width: '100%', maxWidth: 'none' }}>
 
-        <div className="relative w-full px-4 sm:px-6 py-6 sm:py-8" style={{width: '100%', maxWidth: 'none'}}>
-          {/* Back Button */}
-          <button
-            onClick={() => navigate('/courses')}
-            className="mb-4 flex items-center gap-2 text-white/90 hover:text-white transition-colors duration-300 group"
-          >
-            <ArrowLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform duration-300" />
-            <span className="font-medium">Back to Courses</span>
+      {/* ── Hero ── */}
+      <div className="relative overflow-hidden border-b border-slate-800/80">
+        {/* glows */}
+        <div className="pointer-events-none absolute -top-24 -right-24 w-80 h-80 rounded-full bg-sky-600/8 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-16 -left-16 w-64 h-64 rounded-full bg-violet-600/6 blur-3xl" />
+
+        <div className="relative w-full px-4 sm:px-6 py-5 sm:py-7">
+
+          {/* back */}
+          <button onClick={() => navigate('/courses')}
+            className="mb-4 inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-slate-600 hover:text-slate-100 transition-all duration-200 group">
+            <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform duration-200" />
+            Back to Courses
           </button>
 
-          {/* Course Header */}
-          <div className="flex items-start gap-4 mb-6">
-            <div className="bg-white/20 backdrop-blur-sm p-3 sm:p-4 rounded-2xl shadow-lg flex-shrink-0">
-              <GraduationCap className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
+          {/* title row */}
+          <div className="flex items-start gap-3 sm:gap-4 mb-5">
+            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-br from-sky-600/25 to-violet-600/25 border border-sky-500/20 flex items-center justify-center shrink-0">
+              <GraduationCap className="w-6 h-6 sm:w-7 sm:h-7 text-sky-300" />
             </div>
             <div className="flex-1 min-w-0">
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white drop-shadow-lg mb-2 animate-fadeIn">
+              <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-50 leading-tight mb-1.5 break-words">
                 {course.title}
               </h1>
-              <p className="text-base sm:text-lg text-white/90 leading-relaxed animate-slideDown">
-                {course.description}
-              </p>
+              <p className="text-slate-400 text-sm leading-relaxed line-clamp-2">{course.description}</p>
             </div>
           </div>
 
-          {/* Stats Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-6">
-            <div className="bg-white/10 backdrop-blur-md rounded-xl p-3 sm:p-4 border border-white/20 hover:bg-white/20 transition-all duration-300">
-              <div className="flex items-center gap-2 mb-1">
-                <User className="w-4 h-4 text-white/80" />
-                <span className="text-xs text-white/80">Instructor</span>
-              </div>
-              <p className="font-bold text-white text-sm sm:text-base truncate">
-                {creatorProfile?.displayName || 'Unknown'}
-              </p>
-            </div>
-
-            <div className="bg-white/10 backdrop-blur-md rounded-xl p-3 sm:p-4 border border-white/20 hover:bg-white/20 transition-all duration-300">
-              <div className="flex items-center gap-2 mb-1">
-                <Users className="w-4 h-4 text-white/80" />
-                <span className="text-xs text-white/80">Students</span>
-              </div>
-              <p className="font-bold text-white text-lg sm:text-2xl">
-                {course.enrolledUsers?.length || 0}
-              </p>
-            </div>
-
-            <div className="bg-white/10 backdrop-blur-md rounded-xl p-3 sm:p-4 border border-white/20 hover:bg-white/20 transition-all duration-300">
-              <div className="flex items-center gap-2 mb-1">
-                <Video className="w-4 h-4 text-white/80" />
-                <span className="text-xs text-white/80">Meetings</span>
-              </div>
-              <p className="font-bold text-white text-lg sm:text-2xl">
-                {meetings.length}
-              </p>
-            </div>
-
-            <div className="bg-white/10 backdrop-blur-md rounded-xl p-3 sm:p-4 border border-white/20 hover:bg-white/20 transition-all duration-300">
-              <div className="flex items-center gap-2 mb-1">
-                <FileText className="w-4 h-4 text-white/80" />
-                <span className="text-xs text-white/80">Materials</span>
-              </div>
-              <p className="font-bold text-white text-lg sm:text-2xl">
-                {course.materials?.length || 0}
-              </p>
-            </div>
+          {/* stats */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-4 sm:mb-5">
+            <Stat icon={Users}    value={course.enrolledUsers?.length || 0} label="Students"  accent="sky"     />
+            <Stat icon={Video}    value={meetings.length}                   label="Meetings"  accent="violet"  />
+            <Stat icon={FileText} value={course.materials?.length || 0}    label="Materials" accent="emerald" />
+            <Stat icon={Calendar} value={fmtMonth(course.createdAt)}       label="Created"   accent="amber"   />
           </div>
 
-          {/* Role Badge & Enroll Button */}
-          <div className="flex flex-wrap items-center gap-3">
-            {isCreator && (
-              <div className="bg-gradient-to-r from-amber-400/20 to-yellow-400/20 backdrop-blur-md px-4 py-2 rounded-xl border border-amber-300/30 flex items-center gap-2">
-                <Award className="w-5 h-5 text-white" />
-                <span className="font-semibold text-white">Course Instructor</span>
+          {/* instructor + badge/enroll */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-sky-500 to-violet-500 flex items-center justify-center text-white text-sm font-bold shrink-0">
+                {(creatorProfile?.displayName || 'I')[0].toUpperCase()}
               </div>
-            )}
-            {!isEnrolled && !isCreator && (
-              <button
-                onClick={handleEnroll}
-                className="px-6 py-3 rounded-xl bg-white text-purple-600 hover:bg-purple-50 font-semibold flex items-center gap-2 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105"
-              >
-                <UserPlus className="w-5 h-5" />
-                Enroll in Course
-              </button>
-            )}
-            {isEnrolled && !isCreator && (
-              <div className="bg-green-400/20 backdrop-blur-md px-4 py-2 rounded-xl border border-green-300/30 flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-white" />
-                <span className="font-semibold text-white">Enrolled</span>
+              <div>
+                <p className="text-xs text-slate-500">Instructor</p>
+                <p className="text-sm font-semibold text-slate-200 leading-tight">{creatorProfile?.displayName || 'Unknown'}</p>
               </div>
-            )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {enrollError && (
+                <p className="text-xs text-red-400 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5" /> {enrollError}
+                </p>
+              )}
+              {!isEnrolled && !isCreator && (
+                <button onClick={handleEnroll} disabled={enrolling}
+                  className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 disabled:opacity-50 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-sky-900/25 transition-all duration-200">
+                  {enrolling
+                    ? <div className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                    : <UserPlus className="w-4 h-4" />}
+                  {enrolling ? 'Enrolling…' : 'Enroll Now'}
+                </button>
+              )}
+              {isEnrolled && !isCreator && (
+                <div className="flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-2">
+                  <Check className="w-4 h-4 text-emerald-400" />
+                  <span className="text-sm font-semibold text-emerald-300">Enrolled</span>
+                </div>
+              )}
+              {isCreator && (
+                <div className="flex items-center gap-1.5 rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2">
+                  <Sparkles className="w-4 h-4 text-violet-400" />
+                  <span className="text-sm font-semibold text-violet-300">Your Course</span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="w-full px-4 sm:px-6 py-6 sm:py-8" style={{width: '100%', maxWidth: 'none'}}>
+      {/* ── Body ── */}
+      <div className="w-full px-4 sm:px-6 py-5 sm:py-6" style={{ width: '100%', maxWidth: 'none' }}>
+
+        {/* not enrolled gate */}
         {!isEnrolled && !isCreator ? (
-          <div className="bg-white rounded-2xl shadow-lg p-8 sm:p-12 text-center border border-purple-100 animate-fadeIn">
-            <div className="bg-gradient-to-br from-purple-100 to-pink-100 rounded-full p-6 inline-block mb-6">
-              <BookOpen className="w-16 h-16 text-purple-600" />
+          <div className="rounded-2xl border border-slate-700/60 bg-slate-900/60 p-8 sm:p-12 text-center max-w-lg mx-auto">
+            <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center mx-auto mb-4">
+              <BookOpen className="w-7 h-7 text-slate-500" />
             </div>
-            <h3 className="text-2xl font-bold text-gray-800 mb-3">Enroll to Access Course Content</h3>
-            <p className="text-gray-600 mb-8 max-w-md mx-auto">
-              Join this course to view materials, attend meetings, and interact with other students.
+            <h3 className="text-lg font-bold text-slate-100 mb-2">Enroll to access this course</h3>
+            <p className="text-slate-400 text-sm mb-6 leading-relaxed">
+              Join to view materials, attend live meetings, and track your progress.
             </p>
-            <button
-              onClick={handleEnroll}
-              className="px-8 py-3 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-semibold flex items-center gap-2 mx-auto shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105"
-            >
-              <UserPlus className="w-5 h-5" />
-              Enroll Now
+            {enrollError && (
+              <p className="text-xs text-red-400 flex items-center justify-center gap-1 mb-4">
+                <AlertCircle className="w-3.5 h-3.5" /> {enrollError}
+              </p>
+            )}
+            <button onClick={handleEnroll} disabled={enrolling}
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 disabled:opacity-50 px-7 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-900/25 transition-all duration-200">
+              {enrolling ? <div className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" /> : <UserPlus className="w-4 h-4" />}
+              {enrolling ? 'Enrolling…' : 'Enroll Now'}
             </button>
           </div>
+
         ) : (
-          <div className="space-y-6">
-            {/* Tab Navigation with Modern Design */}
-            <div className="bg-white rounded-2xl shadow-lg overflow-hidden border border-gray-100">
-              <div className="border-b border-gray-200 overflow-x-auto">
-                <nav className="flex space-x-1 px-2 sm:px-4 min-w-max" aria-label="Tabs">
-                  <button
-                    onClick={() => setActiveTab('overview')}
-                    className={`py-4 px-4 sm:px-6 font-semibold text-sm transition-all duration-300 border-b-4 ${
-                      activeTab === 'overview'
-                        ? 'border-purple-600 text-purple-600 bg-purple-50/50'
-                        : 'border-transparent text-gray-600 hover:text-purple-600 hover:bg-purple-50/30'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2">
-                      <BookOpen className="w-4 h-4" />
-                      <span>Overview</span>
-                    </div>
-                  </button>
+          <div className="rounded-2xl border border-slate-700/60 bg-slate-900/60 overflow-hidden">
 
-                  <button
-                    onClick={() => setActiveTab('content')}
-                    className={`py-4 px-4 sm:px-6 font-semibold text-sm transition-all duration-300 border-b-4 ${
-                      activeTab === 'content'
-                        ? 'border-purple-600 text-purple-600 bg-purple-50/50'
-                        : 'border-transparent text-gray-600 hover:text-purple-600 hover:bg-purple-50/30'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2">
-                      <Video className="w-4 h-4" />
-                      <span>Content</span>
-                    </div>
-                  </button>
-
-                  {(isEnrolled || isCreator) && (
-                    <button
-                      onClick={() => setActiveTab('progress')}
-                      className={`py-4 px-4 sm:px-6 font-semibold text-sm transition-all duration-300 border-b-4 ${
-                        activeTab === 'progress'
-                          ? 'border-purple-600 text-purple-600 bg-purple-50/50'
-                          : 'border-transparent text-gray-600 hover:text-purple-600 hover:bg-purple-50/30'
-                      }`}
-                    >
-                      <div className="flex items-center space-x-2">
-                        <BarChart3 className="w-4 h-4" />
-                        <span>Progress</span>
-                      </div>
-                    </button>
-                  )}
-                </nav>
-              </div>
+            {/* tabs */}
+            <div className="border-b border-slate-700/60 overflow-x-auto scrollbar-hide">
+              <nav className="flex px-2 min-w-max">
+                {tabs.map(t => <Tab key={t.id} {...t} active={activeTab === t.id} onClick={setActiveTab} />)}
+              </nav>
             </div>
-            
-            {/* Tab Content */}
-            {activeTab === 'overview' && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fadeIn">
-                {/* Course Description */}
-                <div className="lg:col-span-2 space-y-6">
-                  <div className="bg-white rounded-2xl shadow-lg p-6 sm:p-8 border border-gray-100">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="bg-gradient-to-br from-purple-500 to-pink-500 p-2 rounded-xl">
-                        <BookOpen className="w-5 h-5 text-white" />
-                      </div>
-                      <h2 className="text-2xl font-bold text-gray-800">About This Course</h2>
-                    </div>
-                    <p className="text-gray-600 leading-relaxed mb-6">{course.description}</p>
 
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-                      <div className="p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl hover:shadow-md transition-shadow">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Users className="w-4 h-4 text-purple-600" />
-                        </div>
-                        <div className="text-2xl sm:text-3xl font-bold text-purple-600">{course.enrolledUsers?.length || 0}</div>
-                        <div className="text-xs sm:text-sm text-gray-600 font-medium">Students</div>
-                      </div>
-                      <div className="p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl hover:shadow-md transition-shadow">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Video className="w-4 h-4 text-blue-600" />
-                        </div>
-                        <div className="text-2xl sm:text-3xl font-bold text-blue-600">{meetings.length}</div>
-                        <div className="text-xs sm:text-sm text-gray-600 font-medium">Meetings</div>
-                      </div>
-                      <div className="p-4 bg-gradient-to-br from-green-50 to-green-100 rounded-xl hover:shadow-md transition-shadow">
-                        <div className="flex items-center gap-2 mb-1">
-                          <FileText className="w-4 h-4 text-green-600" />
-                        </div>
-                        <div className="text-2xl sm:text-3xl font-bold text-green-600">{course.materials?.length || 0}</div>
-                        <div className="text-xs sm:text-sm text-gray-600 font-medium">Materials</div>
-                      </div>
-                      <div className="p-4 bg-gradient-to-br from-amber-50 to-amber-100 rounded-xl hover:shadow-md transition-shadow">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Calendar className="w-4 h-4 text-amber-600" />
-                        </div>
-                        <div className="text-xl sm:text-2xl font-bold text-amber-600">
-                          {new Date(course.createdAt?.toDate?.() || Date.now()).toLocaleDateString('en', {month: 'short'})}
-                        </div>
-                        <div className="text-xs sm:text-sm text-gray-600 font-medium">Created</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+            {/* tab panels */}
+            <div className="p-4 sm:p-5 lg:p-6">
 
-                {/* Sidebar */}
-                <div className="space-y-6">
-                  {/* Course Info */}
-                  <div className="bg-white rounded-2xl shadow-lg p-6 border border-gray-100">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="bg-gradient-to-br from-purple-500 to-pink-500 p-2 rounded-xl">
-                        <GraduationCap className="w-5 h-5 text-white" />
-                      </div>
-                      <h3 className="text-lg font-bold text-gray-800">Course Info</h3>
+              {/* ── Overview ── */}
+              {activeTab === 'overview' && (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-5">
+                  {/* left col */}
+                  <div className="lg:col-span-2 space-y-4">
+                    <div className="rounded-2xl border border-slate-700/60 bg-slate-950/40 p-4 sm:p-5">
+                      <h2 className="font-semibold text-slate-100 text-sm mb-3 flex items-center gap-2">
+                        <BookOpen className="w-4 h-4 text-sky-400" /> About This Course
+                      </h2>
+                      <p className="text-slate-400 text-sm leading-relaxed">{course.description}</p>
                     </div>
-                    <div className="space-y-4">
-                      <div className="p-3 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl">
-                        <span className="text-xs text-gray-600 font-medium block mb-1">Instructor</span>
-                        <p className="font-bold text-gray-800">{creatorProfile?.displayName || 'Unknown'}</p>
-                      </div>
-                      <div className="p-3 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl">
-                        <span className="text-xs text-gray-600 font-medium block mb-1">Enrolled Students</span>
-                        <p className="font-bold text-gray-800">{course.enrolledUsers?.length || 0} students</p>
-                      </div>
-                      <div className="p-3 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl">
-                        <span className="text-xs text-gray-600 font-medium block mb-1">Course Materials</span>
-                        <p className="font-bold text-gray-800">{course.materials?.length || 0} resources</p>
-                      </div>
-                      <div className="p-3 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl">
-                        <span className="text-xs text-gray-600 font-medium block mb-1">Scheduled Meetings</span>
-                        <p className="font-bold text-gray-800">{meetings.length} meetings</p>
-                      </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { label: 'Students Enrolled', value: course.enrolledUsers?.length || 0, color: 'text-sky-400' },
+                        { label: 'Meetings',           value: meetings.length,                   color: 'text-violet-400' },
+                        { label: 'Course Materials',   value: course.materials?.length || 0,    color: 'text-emerald-400' },
+                        { label: 'Date Created',       value: fmtMonth(course.createdAt),        color: 'text-amber-400' },
+                      ].map(s => (
+                        <div key={s.label} className="rounded-2xl border border-slate-700/60 bg-slate-950/40 p-4 text-center">
+                          <p className={`text-2xl sm:text-3xl font-bold mb-1 ${s.color}`}>{s.value}</p>
+                          <p className="text-xs text-slate-500">{s.label}</p>
+                        </div>
+                      ))}
                     </div>
                   </div>
 
-                  {/* Quick Actions */}
-                  {isCreator && (
-                    <div className="bg-gradient-to-br from-purple-500 to-pink-500 rounded-2xl shadow-lg p-6 text-white">
-                      <div className="flex items-center gap-3 mb-4">
-                        <Sparkles className="w-5 h-5" />
-                        <h3 className="text-lg font-bold">Quick Actions</h3>
-                      </div>
-                      <div className="space-y-2">
-                        <button
-                          onClick={() => setActiveTab('content')}
-                          className="w-full text-left px-4 py-3 rounded-xl bg-white/20 backdrop-blur-sm hover:bg-white/30 flex items-center gap-3 transition-all duration-300 hover:scale-105"
-                        >
-                          <Video className="w-5 h-5" />
-                          <span className="font-medium">Manage Content</span>
-                        </button>
-                        <button
-                          onClick={() => setActiveTab('progress')}
-                          className="w-full text-left px-4 py-3 rounded-xl bg-white/20 backdrop-blur-sm hover:bg-white/30 flex items-center gap-3 transition-all duration-300 hover:scale-105"
-                        >
-                          <BarChart3 className="w-5 h-5" />
-                          <span className="font-medium">View Progress</span>
-                        </button>
+                  {/* right col */}
+                  <div className="space-y-4">
+                    <div className="rounded-2xl border border-slate-700/60 bg-slate-950/40 p-4 sm:p-5">
+                      <h3 className="font-semibold text-slate-300 text-sm mb-4 flex items-center gap-2">
+                        <GraduationCap className="w-4 h-4 text-sky-400" /> Instructor
+                      </h3>
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-sky-500 to-violet-500 flex items-center justify-center text-white font-bold shrink-0">
+                          {(creatorProfile?.displayName || 'I')[0].toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="font-semibold text-slate-100 text-sm truncate">{creatorProfile?.displayName || 'Unknown'}</p>
+                          <p className="text-xs text-slate-500 truncate">{creatorProfile?.email || ''}</p>
+                        </div>
                       </div>
                     </div>
-                  )}
+
+                    {isCreator && (
+                      <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-4 sm:p-5">
+                        <h3 className="font-semibold text-violet-300 text-sm mb-3 flex items-center gap-2">
+                          <Sparkles className="w-4 h-4" /> Quick Actions
+                        </h3>
+                        <div className="space-y-2">
+                          {[
+                            { tab: 'content',  icon: Video,     label: 'Manage Content'   },
+                            { tab: 'meetings', icon: Calendar,  label: 'Schedule Meeting' },
+                            { tab: 'progress', icon: BarChart3, label: 'View Progress'    },
+                          ].map(({ tab, icon: Icon, label }) => (
+                            <button key={tab} onClick={() => setActiveTab(tab)}
+                              className="w-full flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-900 hover:border-violet-500/40 hover:bg-violet-500/5 px-3 py-2.5 text-sm text-slate-300 hover:text-violet-300 transition-all duration-200">
+                              <Icon className="w-4 h-4 shrink-0" /> {label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
-            
-            {activeTab === 'content' && (
-              <div className="animate-fadeIn">
+              )}
+
+              {/* ── Content ── */}
+              {activeTab === 'content' && (
                 <CourseContentHub
                   courseId={courseId}
                   courseTitle={course.title}
@@ -434,19 +331,27 @@ const CoursePage = () => {
                   enrolledEmails={course.enrolledUsers || []}
                   isHost={isCreator}
                 />
-              </div>
-            )}
+              )}
 
-            {activeTab === 'progress' && (isEnrolled || isCreator) && (
-              <CourseProgressDashboard
-                courseId={courseId}
-                courseTitle={course.title}
-              />
-            )}
+              {/* ── Meetings ── */}
+              {activeTab === 'meetings' && (
+                <CourseMeetingScheduler
+                  courseId={courseId}
+                  courseTitle={course.title}
+                  enrolledEmails={course.enrolledUsers || []}
+                  isHost={isCreator}
+                  onMeetingScheduled={m => setMeetings(p => [...p, m])}
+                />
+              )}
+
+              {/* ── Progress ── */}
+              {activeTab === 'progress' && (isEnrolled || isCreator) && (
+                <CourseProgressDashboard courseId={courseId} courseTitle={course.title} />
+              )}
+            </div>
           </div>
         )}
       </div>
-
     </div>
   );
 };

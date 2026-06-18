@@ -278,6 +278,30 @@ const getFeedPosts = async (followingList) => {
   return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 };
 
+const resolveTaggedUsersByMentions = async (content = "", excludeUserId = null) => {
+  const mentionMatches = [...new Set((content.match(/@([a-zA-Z0-9_.]+)/g) || []).map((m) => m.slice(1).toLowerCase()))];
+  if (mentionMatches.length === 0) return [];
+
+  const usersSnapshot = await getDocs(query(collection(db, "users"), limit(200)));
+  const taggedIds = [];
+
+  usersSnapshot.docs.forEach((userDoc) => {
+    const data = userDoc.data() || {};
+    const displayName = String(data.displayName || "").trim().toLowerCase();
+    const compactName = displayName.replace(/\s+/g, "");
+    const username = String(data.username || "").trim().toLowerCase();
+
+    const matched = mentionMatches.some(
+      (mention) => mention === username || mention === compactName || mention === displayName
+    );
+    if (matched && userDoc.id !== excludeUserId) {
+      taggedIds.push(userDoc.id);
+    }
+  });
+
+  return [...new Set(taggedIds)];
+};
+
 // Messages helper functions
 const sendMessageRequest = async (messageData) => {
   // If there is any accepted conversation between these two users, mark as accepted
@@ -468,13 +492,15 @@ export const uploadCourseMaterial = (courseId, file, title, uploaderId, onProgre
 };
 
 export const getCourseMaterials = async (courseId) => {
+  // No orderBy here — avoids needing a composite Firestore index.
+  // Sort by "order" field on the client instead.
   const q = query(
     collection(db, "courseMaterials"),
-    where("courseId", "==", courseId),
-    orderBy("order", "asc")
+    where("courseId", "==", courseId)
   );
   const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  return docs.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 };
 
 export const deleteCourseMaterial = async (materialId) => {
@@ -657,6 +683,7 @@ export {
   getComments,
   getPosts,
   getFeedPosts,
+  resolveTaggedUsersByMentions,
   sendMessageRequest,
   acceptMessageRequest,
   rejectMessageRequest,

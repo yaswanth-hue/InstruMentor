@@ -12,10 +12,10 @@ const StoriesBar = ({ stories, onOpenStory, onCreateStory }) => {
                             onClick={onCreateStory}
                             className="group relative flex flex-col items-center"
                         >
-                            <div className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-gradient-to-br from-amber-400 via-pink-500 to-indigo-500 flex items-center justify-center transition-transform duration-300 shadow-lg shadow-black/40 group-hover:-translate-y-0.5">
-                                <Camera className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
-                                <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-zinc-950 rounded-full flex items-center justify-center ring-2 ring-white/15 shadow-lg">
-                                    <PlusCircle className="w-5 h-5 text-amber-200" />
+                            <div className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-zinc-900 border border-sky-400/30 flex items-center justify-center transition-transform duration-300 shadow-lg shadow-black/40 group-hover:-translate-y-0.5 group-hover:border-sky-300/50">
+                                <Camera className="w-8 h-8 sm:w-10 sm:h-10 text-sky-300" />
+                                <div className="absolute -bottom-2 -right-2 w-8 h-8 bg-zinc-950 rounded-full flex items-center justify-center ring-2 ring-sky-400/30 shadow-lg">
+                                    <PlusCircle className="w-5 h-5 text-sky-300" />
                                 </div>
                             </div>
                             <p className="text-xs sm:text-sm font-semibold text-zinc-200 mt-2.5">Your Update</p>
@@ -29,8 +29,8 @@ const StoriesBar = ({ stories, onOpenStory, onCreateStory }) => {
                                 onClick={() => onOpenStory(userId)}
                                 className="group relative flex flex-col items-center"
                             >
-                                <div className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-3xl p-[2px] bg-gradient-to-tr from-amber-400 via-pink-500 to-indigo-500 transition-transform duration-300 shadow-lg shadow-black/40 group-hover:-translate-y-0.5">
-                                    <div className="w-full h-full rounded-[22px] overflow-hidden bg-zinc-900 flex items-center justify-center border border-white/10">
+                                <div className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-3xl p-[2px] bg-gradient-to-tr from-sky-500 to-cyan-500 transition-transform duration-300 shadow-lg shadow-black/40 group-hover:-translate-y-0.5">
+                                    <div className="w-full h-full rounded-[22px] overflow-hidden bg-zinc-900 flex items-center justify-center border border-sky-400/20">
                                         {storyData.userInfo?.profilePic ? (
                                             <img
                                                 src={storyData.userInfo.profilePic}

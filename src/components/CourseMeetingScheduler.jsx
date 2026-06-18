@@ -1,501 +1,438 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { auth, createMeeting, getMeetings } from '../firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 import {
-  Calendar,
-  Clock,
-  Users,
-  Video,
-  Plus,
-  Trash2,
-  Play,
-  Eye,
-  AlertCircle,
-  X
+  Calendar, Clock, Video, Plus, Trash2, Play, Radio,
+  AlertCircle, X, ChevronDown, ChevronUp, Upload,
+  Check, Loader, Users, FileText
 } from 'lucide-react';
 
-const CourseMeetingScheduler = ({ courseId, courseTitle, enrolledEmails = [], isHost = false, onMeetingScheduled }) => {
-  const [meetings, setMeetings] = useState([]);
-  const [showScheduleForm, setShowScheduleForm] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    scheduledTime: ''
+/* ─── helpers ──────────────────────────────────────────────────────────── */
+const pad = n => String(n).padStart(2, '0');
+
+const fmtDate = raw => {
+  const d = raw?.toDate ? raw.toDate() : new Date(raw);
+  if (isNaN(d)) return '—';
+  return d.toLocaleString([], {
+    weekday: 'short', month: 'short', day: 'numeric',
+    year: 'numeric', hour: '2-digit', minute: '2-digit',
   });
-  const [error, setError] = useState('');
-  const [isCreating, setIsCreating] = useState(false);
-  const [expandedMeeting, setExpandedMeeting] = useState(null);
-  const [uploadStates, setUploadStates] = useState({});
+};
 
-  const currentUser = auth.currentUser;
-  const navigate = useNavigate();
+const getStatus = meeting => {
+  const now = new Date();
+  const t = meeting.scheduledTime?.toDate
+    ? meeting.scheduledTime.toDate()
+    : new Date(meeting.scheduledTime);
+  const diff = t - now;
 
-  useEffect(() => {
-    if (courseId) {
-      loadMeetings();
-    }
-  }, [courseId]);
+  // ended trumps everything
+  if (meeting.endedAt)
+    return { key: 'ended',     label: 'Ended',         cls: 'bg-slate-700/60 text-slate-400 border-slate-600/40' };
+  if (meeting.isActive)
+    return { key: 'live',      label: '● Live Now',    cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 animate-pulse' };
+  if (diff > 0 && diff <= 15 * 60_000)
+    return { key: 'soon',      label: 'Starting Soon', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30' };
+  if (diff > 0)
+    return { key: 'scheduled', label: 'Scheduled',     cls: 'bg-sky-500/15 text-sky-300 border-sky-500/30' };
+  // past & not marked ended
+  return   { key: 'past',      label: 'Completed',     cls: 'bg-slate-700/60 text-slate-400 border-slate-600/40' };
+};
 
-  const loadMeetings = async () => {
-    try {
-      setLoading(true);
-      const meetingsData = await getMeetings(courseId);
-      setMeetings(meetingsData);
-    } catch (error) {
-      console.error('Error loading meetings:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+/* ─── Toast ────────────────────────────────────────────────────────────── */
+let _tid;
+const useToast = () => {
+  const [t, set] = useState(null);
+  const show = useCallback((msg, type = 'info') => {
+    clearTimeout(_tid);
+    set({ msg, type });
+    _tid = setTimeout(() => set(null), 3400);
+  }, []);
+  return [t, show];
+};
+const TC = {
+  success: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+  error:   'border-red-500/40 bg-red-500/10 text-red-300',
+  info:    'border-sky-500/40 bg-sky-500/10 text-sky-300',
+};
+const Toast = ({ t }) => !t ? null : (
+  <div className="fixed top-4 right-4 z-50 pointer-events-none">
+    <div className={`flex items-center gap-2 rounded-2xl border px-4 py-3 text-sm font-medium shadow-2xl backdrop-blur-xl transition-all duration-300 ${TC[t.type]}`}>
+      {t.type === 'success' ? <Check className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
+      {t.msg}
+    </div>
+  </div>
+);
 
-  const handleScheduleMeeting = async (e) => {
-    e.preventDefault();
+/* ─── Confirm modal ─────────────────────────────────────────────────────── */
+const Confirm = ({ onOk, onCancel }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+    <div className="w-full max-w-xs rounded-3xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
+      <p className="text-slate-200 font-medium mb-5">Delete this meeting?</p>
+      <div className="flex gap-3">
+        <button onClick={onCancel} className="flex-1 rounded-2xl border border-slate-700 bg-slate-800 hover:bg-slate-700 py-2.5 text-sm font-semibold text-slate-300 transition-colors">Cancel</button>
+        <button onClick={onOk}     className="flex-1 rounded-2xl bg-red-600 hover:bg-red-500 py-2.5 text-sm font-semibold text-white   transition-colors">Delete</button>
+      </div>
+    </div>
+  </div>
+);
 
-    if (isCreating) return;
+/* ─── Meeting card ──────────────────────────────────────────────────────── */
+const MeetingCard = ({ meeting, isHost, userId, onStart, onJoin, onDelete }) => {
+  const [open, setOpen]         = useState(false);
+  const [confirm, setConfirm]   = useState(false);
+  const [upload, setUpload]     = useState({ file: null, title: '', busy: false });
+  const [toast, notify]         = useToast();
+  const status = getStatus(meeting);
 
-    if (!formData.title.trim() || !formData.scheduledTime) {
-      setError('Please fill in all required fields');
-      return;
-    }
+  const isFinished = status.key === 'ended' || status.key === 'past';
 
-    const scheduledDate = new Date(formData.scheduledTime);
-    if (scheduledDate <= new Date()) {
-      setError('Scheduled time must be in the future');
-      return;
-    }
-
-    try {
-      setIsCreating(true);
-      const meetingData = {
-        courseId: courseId,
-        title: formData.title,
-        description: formData.description,
-        scheduledTime: scheduledDate,
-        hostId: currentUser.uid,
-        hostName: currentUser.displayName || currentUser.email,
-        hostEmail: currentUser.email,
-        allowedEmails: enrolledEmails,
-        isActive: false,
-        participants: []
-      };
-
-      const meetingId = await createMeeting(meetingData);
-      const newMeeting = { id: meetingId, ...meetingData };
-      setMeetings(prev => [...prev, newMeeting]);
-      setShowScheduleForm(false);
-      setFormData({ title: '', description: '', scheduledTime: '' });
-      setError('');
-
-      if (onMeetingScheduled) {
-        onMeetingScheduled(newMeeting);
-      }
-    } catch (error) {
-      console.error('Error scheduling meeting:', error);
-      setError('Failed to schedule meeting. Please try again.');
-    } finally {
-      setIsCreating(false);
-    }
-  };
-
-  const startMeeting = (meetingId) => {
-    navigate(`/meeting/${meetingId}`);
-  };
-
-  const joinMeeting = (meetingId) => {
-    navigate(`/meeting/${meetingId}`);
-  };
-
-  const deleteMeeting = async (meetingId) => {
-    if (!confirm('Are you sure you want to delete this meeting?')) {
-      return;
-    }
-
-    try {
-      const { deleteDoc, doc } = await import('firebase/firestore');
-      const { db } = await import('../firebase');
-
-      await deleteDoc(doc(db, 'meetings', meetingId));
-      setMeetings(prev => prev.filter(m => m.id !== meetingId));
-
-      alert('Meeting deleted successfully');
-    } catch (error) {
-      console.error('Error deleting meeting:', error);
-      alert('Failed to delete meeting');
-    }
-  };
-
-  const uploadMaterial = async (meetingId, file, title) => {
+  const doUpload = async () => {
+    if (!upload.file) return;
+    if (upload.file.size > 500_000) { notify('File too large (max 500 KB)', 'error'); return; }
+    setUpload(u => ({ ...u, busy: true }));
     try {
       const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
       const { db } = await import('../firebase');
-
-      // Check file size (max 500KB)
-      if (file.size > 500000) {
-        alert('File too large. Please select a file smaller than 500KB.');
-        return;
-      }
-
-      // Convert file to base64
-      const fileUrl = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
+      const b64 = await new Promise((res, rej) => {
+        const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(upload.file);
       });
-
       await addDoc(collection(db, 'meetingMaterials'), {
-        meetingId,
-        title: title || file.name,
-        fileName: file.name,
-        fileUrl,
-        uploaderId: currentUser.uid,
-        uploaderName: currentUser.displayName || currentUser.email,
-        createdAt: serverTimestamp()
+        meetingId: meeting.id,
+        title: upload.title || upload.file.name,
+        fileName: upload.file.name,
+        fileUrl: b64,
+        uploaderId: userId,
+        createdAt: serverTimestamp(),
       });
-
-      alert('Material uploaded successfully!');
-    } catch (error) {
-      console.error('Error uploading material:', error);
-      alert('Failed to upload material');
-    }
+      setUpload({ file: null, title: '', busy: false });
+      notify('Material uploaded', 'success');
+    } catch { notify('Upload failed', 'error'); setUpload(u => ({ ...u, busy: false })); }
   };
-
-  const formatDate = (dateString) => {
-    if (dateString && typeof dateString.toDate === 'function') {
-      return dateString.toDate().toLocaleString();
-    }
-    return new Date(dateString).toLocaleString();
-  };
-
-  const getMeetingStatus = (meeting) => {
-    const now = new Date();
-    let scheduledTime;
-
-    if (meeting.scheduledTime && typeof meeting.scheduledTime.toDate === 'function') {
-      scheduledTime = meeting.scheduledTime.toDate();
-    } else {
-      scheduledTime = new Date(meeting.scheduledTime);
-    }
-
-    const timeDiff = scheduledTime - now;
-
-    // Check if host has ended the meeting
-    if (meeting.endedAt) {
-      return { status: 'ended', label: 'Ended', color: 'bg-gray-500' };
-    }
-
-    if (meeting.isActive) {
-      return { status: 'live', label: 'Live Now', color: 'bg-green-500' };
-    } else if (timeDiff > 0 && timeDiff <= 15 * 60 * 1000) {
-      return { status: 'starting-soon', label: 'Starting Soon', color: 'bg-yellow-500' };
-    } else {
-      return { status: 'scheduled', label: 'Scheduled', color: 'bg-blue-500' };
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="animate-pulse">
-          <div className="h-4 bg-gray-200 rounded w-1/4 mb-4"></div>
-          <div className="space-y-3">
-            <div className="h-20 bg-gray-200 rounded"></div>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="bg-white rounded-lg shadow">
-      {/* Header */}
-      <div className="p-6 border-b border-gray-200">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <Video className="w-5 h-5 text-purple-600" />
-            <h2 className="text-lg font-semibold text-gray-800">Course Meetings</h2>
-          </div>
+    <>
+      <Toast t={toast} />
+      {confirm && <Confirm onOk={() => { setConfirm(false); onDelete(meeting.id); }} onCancel={() => setConfirm(false)} />}
 
-          {isHost && (
-            <button
-              onClick={() => setShowScheduleForm(true)}
-              className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Schedule Meeting</span>
+      <div className="rounded-2xl border border-slate-700/50 bg-slate-900/50 hover:border-slate-600/70 transition-all duration-200 overflow-hidden">
+        <div className="p-4">
+          <div className="flex items-start gap-3">
+            {/* icon */}
+            <div className={`w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 mt-0.5 ${
+              isFinished ? 'bg-slate-800 border-slate-700' : 'bg-sky-500/10 border-sky-500/20'
+            }`}>
+              <Video className={`w-4 h-4 ${isFinished ? 'text-slate-500' : 'text-sky-400'}`} />
+            </div>
+
+            {/* info */}
+            <div className="flex-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-2 mb-1">
+                <h3 className="font-semibold text-slate-100 text-sm leading-snug">{meeting.title}</h3>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium border ${status.cls}`}>{status.label}</span>
+              </div>
+              {meeting.description && (
+                <p className="text-slate-400 text-xs mb-2 leading-relaxed">{meeting.description}</p>
+              )}
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-500">
+                <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" />{fmtDate(meeting.scheduledTime)}</span>
+                <span className="flex items-center gap-1"><Users className="w-3.5 h-3.5" />{meeting.allowedEmails?.length || 0} invited</span>
+              </div>
+            </div>
+
+            {/* actions */}
+            <div className="flex items-center gap-1.5 shrink-0 ml-1">
+              {/* host: Start — only when NOT finished */}
+              {isHost && !isFinished && (
+                <button onClick={() => onStart(meeting.id)}
+                  className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors shadow-lg shadow-emerald-900/20">
+                  <Play className="w-3.5 h-3.5" /> Start
+                </button>
+              )}
+              {/* student: Join — only live or soon */}
+              {!isHost && (status.key === 'live' || status.key === 'soon') && (
+                <button onClick={() => onJoin(meeting.id)}
+                  className="flex items-center gap-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors shadow-lg shadow-sky-900/20">
+                  <Radio className="w-3.5 h-3.5" /> Join
+                </button>
+              )}
+              {/* host: delete */}
+              {isHost && (
+                <button onClick={() => setConfirm(true)}
+                  className="p-1.5 rounded-xl border border-slate-700 hover:border-red-500/50 hover:bg-red-500/10 text-slate-500 hover:text-red-400 transition-all">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+              {/* host: expand materials */}
+              {isHost && (
+                <button onClick={() => setOpen(o => !o)}
+                  className="p-1.5 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-all">
+                  {open ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Materials upload (host only) */}
+        {isHost && open && (
+          <div className="border-t border-slate-700/50 bg-slate-950/40 p-4 space-y-3">
+            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-1.5">
+              <Upload className="w-3.5 h-3.5" /> Upload Material
+            </p>
+            <input type="text" value={upload.title} onChange={e => setUpload(u => ({ ...u, title: e.target.value }))}
+              placeholder="Title (optional)"
+              className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500/50 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition" />
+            <input type="file" onChange={e => setUpload(u => ({ ...u, file: e.target.files?.[0] || null }))}
+              className="w-full text-xs text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-sky-600 file:text-white hover:file:bg-sky-500 cursor-pointer" />
+            {upload.file && (
+              <div className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2">
+                <FileText className="w-4 h-4 text-sky-400 shrink-0" />
+                <span className="text-xs text-slate-300 truncate flex-1">{upload.file.name}</span>
+                <span className="text-xs text-slate-500">{(upload.file.size / 1024).toFixed(0)} KB</span>
+              </div>
+            )}
+            <button onClick={doUpload} disabled={!upload.file || upload.busy}
+              className="w-full rounded-xl bg-sky-600 hover:bg-sky-500 disabled:bg-slate-700 disabled:text-slate-500 py-2.5 text-sm font-semibold text-white transition-colors flex items-center justify-center gap-2">
+              {upload.busy ? <><Loader className="w-4 h-4 animate-spin" /> Uploading…</> : <><Upload className="w-4 h-4" /> Upload</>}
             </button>
-          )}
-        </div>
-      </div>
-
-      {/* Meeting Schedule Form */}
-      {showScheduleForm && (
-        <div className="p-6 border-b border-gray-200 bg-gray-50">
-          <form onSubmit={handleScheduleMeeting} className="space-y-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-medium text-gray-800">Schedule New Meeting</h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowScheduleForm(false);
-                  setError('');
-                  setFormData({ title: '', description: '', scheduledTime: '' });
-                }}
-                className="p-2 hover:bg-gray-200 rounded-lg"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {error && (
-              <div className="flex items-center space-x-2 p-3 bg-red-100 border border-red-300 rounded-lg text-red-700">
-                <AlertCircle className="w-4 h-4" />
-                <span className="text-sm">{error}</span>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Meeting Title *
-                </label>
-                <input
-                  type="text"
-                  value={formData.title}
-                  onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-                  placeholder="e.g., Week 1: Introduction"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Scheduled Time *
-                </label>
-                <input
-                  type="datetime-local"
-                  value={formData.scheduledTime}
-                  onChange={(e) => setFormData(prev => ({ ...prev, scheduledTime: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  required
-                  min={new Date().toISOString().slice(0, 16)}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Description
-              </label>
-              <textarea
-                value={formData.description}
-                onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                placeholder="Optional meeting description or agenda..."
-                rows={3}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-              />
-            </div>
-
-            <div className="flex items-center justify-between pt-4">
-              <div className="text-sm text-gray-600">
-                <Users className="w-4 h-4 inline mr-1" />
-                {enrolledEmails.length} students will be notified
-              </div>
-
-              <div className="flex space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setShowScheduleForm(false)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isCreating}
-                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:bg-gray-400"
-                >
-                  {isCreating ? 'Creating...' : 'Schedule Meeting'}
-                </button>
-              </div>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* Meetings List */}
-      <div className="p-6">
-        {meetings.length === 0 ? (
-          <div className="text-center py-8">
-            <Video className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-            <p className="text-gray-500 mb-2">No meetings scheduled yet</p>
-            {isHost && (
-              <p className="text-sm text-gray-400">
-                Click "Schedule Meeting" to create your first meeting
-              </p>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {meetings
-              .sort((a, b) => {
-                const dateA = a.scheduledTime?.toDate ? a.scheduledTime.toDate() : new Date(a.scheduledTime);
-                const dateB = b.scheduledTime?.toDate ? b.scheduledTime.toDate() : new Date(b.scheduledTime);
-                return dateA - dateB;
-              })
-              .map((meeting) => {
-                const status = getMeetingStatus(meeting);
-                const isExpanded = expandedMeeting === meeting.id;
-                const uploadState = uploadStates[meeting.id] || { file: null, title: '', uploading: false };
-
-                const setUploadFile = (file) => {
-                  setUploadStates(prev => ({
-                    ...prev,
-                    [meeting.id]: { ...prev[meeting.id], file }
-                  }));
-                };
-
-                const setUploadTitle = (title) => {
-                  setUploadStates(prev => ({
-                    ...prev,
-                    [meeting.id]: { ...prev[meeting.id], title }
-                  }));
-                };
-
-                const setUploading = (uploading) => {
-                  setUploadStates(prev => ({
-                    ...prev,
-                    [meeting.id]: { ...prev[meeting.id], uploading }
-                  }));
-                };
-
-                return (
-                  <div key={meeting.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-3 mb-2">
-                          <h3 className="font-medium text-gray-800">{meeting.title}</h3>
-                          <span className={`text-xs px-2 py-1 rounded-full text-white ${status.color}`}>
-                            {status.label}
-                          </span>
-                        </div>
-
-                        {meeting.description && (
-                          <p className="text-gray-600 text-sm mb-2">{meeting.description}</p>
-                        )}
-
-                        <div className="flex items-center space-x-4 text-sm text-gray-500">
-                          <div className="flex items-center space-x-1">
-                            <Calendar className="w-4 h-4" />
-                            <span>{formatDate(meeting.scheduledTime)}</span>
-                          </div>
-
-                          <div className="flex items-center space-x-1">
-                            <Users className="w-4 h-4" />
-                            <span>{meeting.allowedEmails?.length || 0} invited</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center space-x-2 ml-4">
-                        {/* Host can always start */}
-                        {isHost && status.status !== 'ended' && (
-                          <button
-                            onClick={() => startMeeting(meeting.id)}
-                            className="flex items-center space-x-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium"
-                          >
-                            <Play className="w-4 h-4" />
-                            <span>Start Meeting</span>
-                          </button>
-                        )}
-
-                        {/* Students can join when live or starting soon */}
-                        {!isHost && (status.status === 'live' || status.status === 'starting-soon') && (
-                          <button
-                            onClick={() => joinMeeting(meeting.id)}
-                            className="flex items-center space-x-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium"
-                          >
-                            <Video className="w-4 h-4" />
-                            <span>Join Meeting</span>
-                          </button>
-                        )}
-
-                        {/* Delete button */}
-                        {isHost && (
-                          <button
-                            onClick={() => deleteMeeting(meeting.id)}
-                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
-                            title="Delete meeting"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Materials Section - Only for host */}
-                    {isHost && (
-                      <div className="mt-3 pt-3 border-t">
-                        <button
-                          onClick={() => setExpandedMeeting(isExpanded ? null : meeting.id)}
-                          className="text-sm text-purple-600 hover:text-purple-700 font-medium flex items-center gap-1"
-                        >
-                          {isExpanded ? '− Hide Materials Upload' : '+ Upload Materials'}
-                        </button>
-
-                        {isExpanded && (
-                          <div className="mt-3 p-4 bg-gray-50 rounded border border-gray-200">
-                            <div className="space-y-3">
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                  Material Title (optional)
-                                </label>
-                                <input
-                                  type="text"
-                                  value={uploadState.title}
-                                  onChange={(e) => setUploadTitle(e.target.value)}
-                                  placeholder="e.g., Lecture Slides, Assignment 1"
-                                  className="w-full border rounded px-3 py-2 text-sm"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                  Select File
-                                </label>
-                                <input
-                                  type="file"
-                                  onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                                  className="w-full text-sm"
-                                />
-                              </div>
-                              <button
-                                disabled={!uploadState.file || uploadState.uploading}
-                                onClick={async () => {
-                                  if (!uploadState.file) return;
-                                  setUploading(true);
-                                  await uploadMaterial(meeting.id, uploadState.file, uploadState.title || uploadState.file.name);
-                                  setUploadFile(null);
-                                  setUploadTitle('');
-                                  setUploading(false);
-                                }}
-                                className="w-full px-4 py-2 rounded bg-purple-600 text-white disabled:bg-gray-300 text-sm font-medium hover:bg-purple-700"
-                              >
-                                {uploadState.uploading ? 'Uploading...' : 'Upload Material'}
-                              </button>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
           </div>
         )}
       </div>
+    </>
+  );
+};
+
+/* ─── Schedule form ─────────────────────────────────────────────────────── */
+const ScheduleForm = ({ enrolledCount, onSubmit, onClose, isCreating, error }) => {
+  const now     = new Date();
+  const minDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const minTime = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const [form, setForm] = useState({ title: '', description: '', date: '', time: '' });
+  const set = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
+
+  return (
+    <div className="border-b border-slate-700/50 bg-slate-950/30 p-4 sm:p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-semibold text-slate-100 text-sm flex items-center gap-2">
+          <Calendar className="w-4 h-4 text-sky-400" /> Schedule Meeting
+        </h3>
+        <button onClick={onClose} className="p-1.5 rounded-xl hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-colors">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      {error && (
+        <div className="mb-4 flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-xs text-red-300">
+          <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {error}
+        </div>
+      )}
+
+      <form onSubmit={e => { e.preventDefault(); onSubmit(form); }} className="space-y-3">
+        <div>
+          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Title *</label>
+          <input type="text" value={form.title} onChange={set('title')} placeholder="e.g. Week 3 — Live Q&A" required
+            className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500/60 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition" />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+              <Calendar className="w-3 h-3" /> Date *
+            </label>
+            <input type="date" value={form.date} onChange={set('date')} min={minDate} required
+              className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-slate-100 focus:border-sky-500/60 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition [color-scheme:dark]" />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+              <Clock className="w-3 h-3" /> Time *
+            </label>
+            <input type="time" value={form.time} onChange={set('time')} min={form.date === minDate ? minTime : undefined} required
+              className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-slate-100 focus:border-sky-500/60 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition [color-scheme:dark]" />
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Description</label>
+          <textarea value={form.description} onChange={set('description')} rows={2} placeholder="Agenda or notes for students…"
+            className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500/60 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition resize-none" />
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-1">
+          <span className="text-xs text-slate-500 flex items-center gap-1.5">
+            <Users className="w-3.5 h-3.5" /> {enrolledCount} student{enrolledCount !== 1 ? 's' : ''} enrolled
+          </span>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <button type="button" onClick={onClose}
+              className="flex-1 sm:flex-none rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-300 transition-colors">
+              Cancel
+            </button>
+            <button type="submit" disabled={isCreating}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 disabled:opacity-50 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-sky-900/20 transition-all duration-200">
+              {isCreating ? <><Loader className="w-4 h-4 animate-spin" /> Creating…</> : <><Check className="w-4 h-4" /> Schedule</>}
+            </button>
+          </div>
+        </div>
+      </form>
     </div>
+  );
+};
+
+/* ─── Main ──────────────────────────────────────────────────────────────── */
+const CourseMeetingScheduler = ({ courseId, enrolledEmails = [], isHost = false, onMeetingScheduled }) => {
+  const [meetings,     setMeetings]     = useState([]);
+  const [showForm,     setShowForm]     = useState(false);
+  const [loading,      setLoading]      = useState(true);
+  const [isCreating,   setIsCreating]   = useState(false);
+  const [formError,    setFormError]    = useState('');
+  const [currentUser,  setCurrentUser]  = useState(auth.currentUser);
+  const [toast, notify] = useToast();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, u => setCurrentUser(u));
+    return unsub;
+  }, []);
+
+  useEffect(() => { if (courseId) load(); }, [courseId]);
+
+  const load = async () => {
+    try {
+      setLoading(true);
+      setMeetings(await getMeetings(courseId));
+    } catch (e) {
+      console.error('getMeetings:', e);
+      notify('Failed to load meetings', 'error');
+    } finally { setLoading(false); }
+  };
+
+  const handleSubmit = async ({ title, description, date, time }) => {
+    setFormError('');
+    if (!title.trim())  { setFormError('Please enter a title.'); return; }
+    if (!date || !time) { setFormError('Please pick a date and time.'); return; }
+    const dt = new Date(`${date}T${time}`);
+    if (isNaN(dt.getTime())) { setFormError('Invalid date or time.'); return; }
+    if (dt <= new Date())    { setFormError('Please choose a future date and time.'); return; }
+
+    const user = auth.currentUser;
+    if (!user) { setFormError('You must be signed in.'); return; }
+
+    try {
+      setIsCreating(true);
+      const data = {
+        courseId, title: title.trim(), description: description.trim(),
+        scheduledTime: dt,
+        hostId: user.uid, hostName: user.displayName || user.email, hostEmail: user.email,
+        allowedEmails: enrolledEmails, isActive: false, participants: [],
+      };
+      const id = await createMeeting(data);
+      const nm = { id, ...data };
+      setMeetings(p => [...p, nm]);
+      setShowForm(false);
+      setFormError('');
+      notify('Meeting scheduled!', 'success');
+      onMeetingScheduled?.(nm);
+    } catch (e) {
+      console.error('createMeeting:', e);
+      setFormError(`Failed: ${e?.message || 'Unknown error'}`);
+    } finally { setIsCreating(false); }
+  };
+
+  const handleDelete = async id => {
+    try {
+      const { deleteDoc, doc } = await import('firebase/firestore');
+      const { db }             = await import('../firebase');
+      await deleteDoc(doc(db, 'meetings', id));
+      setMeetings(p => p.filter(m => m.id !== id));
+      notify('Meeting deleted', 'info');
+    } catch (e) {
+      console.error(e);
+      notify('Failed to delete meeting', 'error');
+    }
+  };
+
+  const sorted = [...meetings].sort((a, b) => {
+    const ta = a.scheduledTime?.toDate ? a.scheduledTime.toDate() : new Date(a.scheduledTime);
+    const tb = b.scheduledTime?.toDate ? b.scheduledTime.toDate() : new Date(b.scheduledTime);
+    return ta - tb;
+  });
+
+  return (
+    <>
+      <Toast t={toast} />
+      <div className="rounded-2xl border border-slate-700/50 bg-slate-900/60 backdrop-blur-xl shadow-xl overflow-hidden">
+
+        {/* header */}
+        <div className="flex items-center justify-between px-4 sm:px-5 py-4 border-b border-slate-700/50">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center">
+              <Video className="w-4 h-4 text-sky-400" />
+            </div>
+            <div>
+              <h2 className="font-semibold text-slate-100 text-sm">Meetings</h2>
+              <p className="text-xs text-slate-500">{meetings.length} scheduled</p>
+            </div>
+          </div>
+          {isHost && !showForm && (
+            <button onClick={() => { setShowForm(true); setFormError(''); }}
+              className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 px-3 py-2 text-xs font-semibold text-white shadow-lg shadow-sky-900/20 transition-all duration-200">
+              <Plus className="w-3.5 h-3.5" /> Schedule
+            </button>
+          )}
+        </div>
+
+        {/* form */}
+        {showForm && (
+          <ScheduleForm
+            enrolledCount={enrolledEmails.length}
+            onSubmit={handleSubmit}
+            onClose={() => { setShowForm(false); setFormError(''); }}
+            isCreating={isCreating}
+            error={formError}
+          />
+        )}
+
+        {/* list */}
+        <div className="p-4 sm:p-5">
+          {loading ? (
+            <div className="space-y-3">
+              {[1, 2].map(i => (
+                <div key={i} className="rounded-2xl border border-slate-700/40 bg-slate-900/40 p-4 animate-pulse">
+                  <div className="flex gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-slate-800" />
+                    <div className="flex-1 space-y-2 pt-0.5">
+                      <div className="h-3.5 bg-slate-800 rounded w-2/5" />
+                      <div className="h-3 bg-slate-800 rounded w-3/5" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : sorted.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center mb-3">
+                <Video className="w-6 h-6 text-slate-500" />
+              </div>
+              <p className="font-medium text-slate-300 text-sm mb-1">No meetings yet</p>
+              <p className="text-xs text-slate-500">
+                {isHost ? 'Click "Schedule" to create your first session.' : 'No meetings scheduled yet.'}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {sorted.map(m => (
+                <MeetingCard key={m.id} meeting={m} isHost={isHost} userId={currentUser?.uid}
+                  onStart={id => navigate(`/meeting/${id}`)}
+                  onJoin={id  => navigate(`/meeting/${id}`)}
+                  onDelete={handleDelete}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   );
 };
 

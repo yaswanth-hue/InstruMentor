@@ -1,28 +1,21 @@
 import http from 'http';
 import app from './app.js';
 import { initSocket } from './sockets/index.js';
-import { connectRedis } from './config/redis.js';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.join(__dirname, '../config/.env') });
+// Load .env from project root (Retro/.env), with fallback to legacy config/.env location
+dotenv.config({ path: path.join(__dirname, '../.env') });
 
 const PORT = process.env.PORT || 3001;
 
 const startServer = async () => {
-    // 1. Connect to Redis
-    await connectRedis();
-
-    // 2. Create HTTP Server
     const server = http.createServer(app);
-
-    // 3. Initialize Socket.IO
     const io = initSocket(server);
-    app.set('io', io); // Make io available in routes
+    app.set('io', io);
 
-    // 4. Start Server
     server.listen(PORT, () => {
         console.log(`Server running on port ${PORT}`);
         console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);

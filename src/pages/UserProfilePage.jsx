@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Cropper from 'react-easy-crop';
 import { Helmet } from 'react-helmet-async';
@@ -67,13 +67,14 @@ const ProfilePage = () => {
   // Profile states
   const [userProfile, setUserProfile] = useState(defaultProfile);
   const [posts, setPosts] = useState([]);
+  const [taggedPosts, setTaggedPosts] = useState([]);
   const [createdCourses, setCreatedCourses] = useState([]);
   const [enrolledCourses, setEnrolledCourses] = useState([]);
   const isFollowing = userProfile?.followers?.includes(currentUserId) || false;
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("gallery"); // gallery, vibes, streams, courses
+  const [activeTab, setActiveTab] = useState("media"); // media, courses
   const [courseSubTab, setCourseSubTab] = useState("created"); // created or enrolled
-  const [mediaTab, setMediaTab] = useState("all"); // all, reels, videos
+  const [mediaTab, setMediaTab] = useState("posts"); // posts, reels, tagged
 
   // Profile editing states
   const [uploading, setUploading] = useState(false);
@@ -90,6 +91,7 @@ const ProfilePage = () => {
   // Image viewer modal states
   const [showProfilePicModal, setShowProfilePicModal] = useState(false);
   const [showBannerModal, setShowBannerModal] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   // Image cropper states
   const [showCropModal, setShowCropModal] = useState(false);
@@ -237,8 +239,9 @@ const ProfilePage = () => {
 
       // Only load posts and courses if user can view content
       if (canViewContent) {
-        const [userPosts, created, enrolled] = await Promise.all([
+        const [userPosts, allPosts, created, enrolled] = await Promise.all([
           getPosts(profileUserId),
+          getPosts(),
           getCourses(profileUserId),
           getEnrolledCourses(profileUserId),
         ]);
@@ -246,12 +249,19 @@ const ProfilePage = () => {
         if (signal?.aborted) return;
 
         setPosts((userPosts || []).filter(post => post.imageUrl || post.mediaUrl));
+        setTaggedPosts(
+          (allPosts || []).filter((post) => {
+            const tags = post.taggedUsers || [];
+            return Array.isArray(tags) && tags.includes(profileUserId) && post.userId !== profileUserId;
+          })
+        );
         setCreatedCourses(created || []);
         setEnrolledCourses(enrolled || []);
       } else {
         // Private account - clear content
         if (!signal?.aborted) {
           setPosts([]);
+          setTaggedPosts([]);
           setCreatedCourses([]);
           setEnrolledCourses([]);
         }
@@ -539,6 +549,22 @@ const ProfilePage = () => {
     }
   };
 
+  const reelPosts = useMemo(
+    () =>
+      posts.filter(
+        (post) => post.mediaType === 'reel' || (post.mediaType === 'video' && post.videoDuration && post.videoDuration <= 120)
+      ),
+    [posts]
+  );
+
+  const standardPosts = useMemo(
+    () =>
+      posts.filter(
+        post => post.mediaType !== 'reel' && !(post.mediaType === 'video' && post.videoDuration && post.videoDuration <= 120)
+      ),
+    [posts]
+  );
+
   if (!userProfile && !loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 flex items-center justify-center" style={{width: '100%', maxWidth: 'none'}}>
@@ -586,7 +612,7 @@ const ProfilePage = () => {
 
               <div className="min-w-0 text-center">
                 <p className="text-sm sm:text-base font-semibold text-zinc-100 truncate max-w-[50vw]">
-                  {userProfile?.displayName || 'Profile'}
+                  {userProfile?.username ? `@${userProfile.username}` : (userProfile?.displayName || 'Profile')}
                 </p>
                 <p className="text-[11px] text-zinc-500">{posts.length} posts</p>
               </div>
@@ -604,11 +630,12 @@ const ProfilePage = () => {
                     </button>
                     <button
                       type="button"
-                      onClick={handleSignOut}
-                      className="cursor-pointer inline-flex items-center justify-center h-10 w-10 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition-colors"
-                      aria-label="Sign out"
+                      onClick={() => setShowLogoutModal(true)}
+                      className="cursor-pointer inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-semibold text-zinc-100 hover:bg-white/10 transition-colors"
+                      aria-label="Logout"
                     >
-                      <LogOut className="w-5 h-5 text-zinc-200" />
+                      <LogOut className="w-4 h-4 text-zinc-200" />
+                      <span className="hidden sm:inline">Logout</span>
                     </button>
                   </>
                 )}
@@ -620,9 +647,9 @@ const ProfilePage = () => {
           </div>
         </header>
 
-        {/* New layout: fixed photo pane + scrollable content */}
-        <div className="w-full lg:h-[calc(100vh-80px)] overflow-hidden">
-          <div className="max-w-7xl mx-auto lg:h-full grid grid-cols-1 lg:grid-cols-12 gap-0 lg:gap-6 px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+        {/* New layout: fixed photo pane + natural page scroll */}
+        <div className="w-full">
+          <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-0 lg:gap-6 px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
             {/* Left: Full-height profile photo pane (desktop) */}
             <aside className="hidden lg:block lg:col-span-5 lg:h-full profile-avatar">
               <div className="h-full rounded-[2.5rem] overflow-hidden border border-white/10 bg-zinc-900/40 shadow-2xl shadow-black/50">
@@ -700,9 +727,9 @@ const ProfilePage = () => {
               )}
             </aside>
 
-            {/* Right: Scrollable profile content */}
+            {/* Right: Profile content */}
             <section
-              className="lg:col-span-7 lg:h-full lg:overflow-y-auto lg:pr-2 profile-content"
+              className="lg:col-span-7 lg:pr-2 profile-content"
               ref={profileContentRef}
             >
               <div className="rounded-3xl border border-white/10 bg-zinc-900/60 backdrop-blur-2xl shadow-2xl shadow-black/40 p-6">
@@ -718,13 +745,13 @@ const ProfilePage = () => {
 
             {/* User Name */}
             {isEditingName && isOwnProfile ? (
-              <div className="flex items-center justify-center gap-2 mb-2">
+              <div className="flex items-center justify-center gap-2 mb-3">
                 <input
                   type="text"
                   value={displayNameText}
                   onChange={(e) => setDisplayNameText(e.target.value.slice(0, 30))}
-                  className="text-3xl font-bold text-gray-900 bg-white/80 backdrop-blur-xl border-2 border-indigo-200 rounded-xl px-4 py-2 focus:border-indigo-500 focus:outline-none text-center"
-                  placeholder="Your Name"
+                  className="w-full max-w-sm rounded-xl border border-slate-600 bg-slate-900 px-4 py-2 text-center text-xl font-semibold text-slate-100 focus:border-sky-400 focus:outline-none"
+                  placeholder="Your name"
                   maxLength={30}
                 />
                 <button
@@ -732,9 +759,9 @@ const ProfilePage = () => {
                     setDisplayNameText(userProfile?.displayName || '');
                     setIsEditingName(false);
                   }}
-                  className="p-2 text-gray-600 hover:bg-gray-100 rounded-xl transition-all"
+                  className="rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-slate-300 hover:bg-slate-800"
                 >
-                  ✕
+                  Cancel
                 </button>
                 <button
                   onClick={async () => {
@@ -746,14 +773,14 @@ const ProfilePage = () => {
                       setIsEditingName(false);
                     }
                   }}
-                  className="p-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:shadow-lg transition-all"
+                  className="rounded-xl bg-sky-600 px-4 py-2 font-semibold text-white hover:bg-sky-500"
                 >
-                  ✓
+                  Save
                 </button>
               </div>
             ) : (
-              <div className="relative group mb-2">
-                <h2 className="text-3xl font-bold text-gray-900 text-center">
+              <div className="relative group mb-3 text-center">
+                <h2 className="text-2xl sm:text-3xl font-bold text-slate-100">
                   {userProfile?.displayName || "Music Enthusiast"}
                 </h2>
                 {isOwnProfile && (
@@ -762,11 +789,9 @@ const ProfilePage = () => {
                       setDisplayNameText(userProfile?.displayName || '');
                       setIsEditingName(true);
                     }}
-                    className="absolute -right-8 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-2 text-indigo-600 hover:bg-indigo-50 rounded-full transition-all"
+                    className="absolute -right-2 top-1/2 -translate-y-1/2 rounded-xl border border-slate-600 bg-slate-900 px-2 py-1 text-xs text-slate-300 opacity-0 transition-all group-hover:opacity-100 hover:bg-slate-800"
                   >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                    </svg>
+                    Edit
                   </button>
                 )}
               </div>
@@ -775,24 +800,24 @@ const ProfilePage = () => {
             {/* Bio Section */}
             <div className="w-full mb-6">
               {isEditingBio && isOwnProfile ? (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <textarea
                     value={bioText}
                     onChange={(e) => setBioText(e.target.value.slice(0, 150))}
                     placeholder="Write something about yourself..."
-                    className="w-full px-4 py-3 bg-white/80 backdrop-blur-xl rounded-2xl border-2 border-indigo-200 focus:border-indigo-500 focus:outline-none resize-none text-gray-700"
+                    className="w-full rounded-2xl border border-slate-600 bg-slate-900 px-4 py-3 text-sm text-slate-200 placeholder:text-slate-500 focus:border-sky-400 focus:outline-none resize-none"
                     rows="3"
                     maxLength={150}
                   />
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-gray-500">{bioText.length}/150</span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-500">{bioText.length}/150</span>
                     <div className="flex gap-2">
                       <button
                         onClick={() => {
                           setBioText(userProfile.bio || '');
                           setIsEditingBio(false);
                         }}
-                        className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-xl font-medium transition-all"
+                        className="rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
                       >
                         Cancel
                       </button>
@@ -804,7 +829,7 @@ const ProfilePage = () => {
                           setUserProfile(prev => ({ ...prev, bio: bioText }));
                           setIsEditingBio(false);
                         }}
-                        className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-medium hover:shadow-lg transition-all"
+                        className="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-500"
                       >
                         Save
                       </button>
@@ -813,8 +838,8 @@ const ProfilePage = () => {
                 </div>
               ) : (
                 <div className="relative group">
-                  <p className="text-gray-600 text-center px-4">
-                    {userProfile?.bio || (isOwnProfile ? "Add a bio to tell others about yourself" : "No bio yet")}
+                  <p className="text-center text-sm sm:text-base text-slate-300 px-2">
+                    {userProfile?.bio || (isOwnProfile ? "Add a bio to tell others about yourself." : "No bio yet.")}
                   </p>
                   {isOwnProfile && (
                     <button
@@ -822,74 +847,104 @@ const ProfilePage = () => {
                         setBioText(userProfile?.bio || '');
                         setIsEditingBio(true);
                       }}
-                      className="absolute -right-8 top-0 opacity-0 group-hover:opacity-100 p-2 text-indigo-600 hover:bg-indigo-50 rounded-full transition-all"
+                      className="absolute -right-2 top-0 rounded-xl border border-slate-600 bg-slate-900 px-2 py-1 text-xs text-slate-300 opacity-0 transition-all group-hover:opacity-100 hover:bg-slate-800"
                     >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                      </svg>
+                      Edit
                     </button>
                   )}
                 </div>
               )}
             </div>
 
-            {/* Animated Stats Row */}
-            <div className="flex justify-center items-center gap-2 sm:gap-3 md:gap-4 mb-6 sm:mb-8 w-full max-w-md">
-              <div className="bg-white/80 backdrop-blur-xl rounded-2xl shadow-lg border border-indigo-100 px-4 py-3 sm:px-6 sm:py-4 md:px-8 hover:shadow-2xl hover:scale-110 hover:-translate-y-1 transition-all duration-300 cursor-pointer group text-center flex-1">
-                <div className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent group-hover:scale-125 transition-transform">
-                  {posts.length}
-                </div>
-                <div className="text-xs sm:text-sm text-gray-600 font-medium">Posts</div>
+            {/* Stats Row */}
+            <div className="grid w-full grid-cols-3 gap-3 mb-6">
+              <div className="rounded-2xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-center">
+                <div className="text-xl font-bold text-slate-100">{posts.length}</div>
+                <div className="text-xs text-slate-400">Posts</div>
               </div>
               <button
                 onClick={() => {
                   setShowFollowersModal(true);
                   loadFollowersList();
                 }}
-                className="bg-white/80 backdrop-blur-xl rounded-2xl shadow-lg border border-indigo-100 px-4 py-3 sm:px-6 sm:py-4 md:px-8 hover:shadow-2xl hover:scale-110 hover:-translate-y-1 transition-all duration-300 cursor-pointer group text-center flex-1"
+                className="rounded-2xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-center hover:bg-slate-800 transition-colors"
               >
-                <div className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent group-hover:scale-125 transition-transform">
-                  {userProfile.followers?.length || 0}
-                </div>
-                <div className="text-xs sm:text-sm text-gray-600 font-medium">Followers</div>
+                <div className="text-xl font-bold text-slate-100">{userProfile.followers?.length || 0}</div>
+                <div className="text-xs text-slate-400">Followers</div>
               </button>
               <button
                 onClick={() => {
                   setShowFollowingModal(true);
                   loadFollowingList();
                 }}
-                className="bg-white/80 backdrop-blur-xl rounded-2xl shadow-lg border border-indigo-100 px-4 py-3 sm:px-6 sm:py-4 md:px-8 hover:shadow-2xl hover:scale-110 hover:-translate-y-1 transition-all duration-300 cursor-pointer group text-center flex-1"
+                className="rounded-2xl border border-slate-700 bg-slate-900/70 px-4 py-3 text-center hover:bg-slate-800 transition-colors"
               >
-                <div className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-pink-600 to-indigo-600 bg-clip-text text-transparent group-hover:scale-125 transition-transform">
-                  {userProfile.following?.length || 0}
-                </div>
-                <div className="text-xs sm:text-sm text-gray-600 font-medium">Following</div>
+                <div className="text-xl font-bold text-slate-100">{userProfile.following?.length || 0}</div>
+                <div className="text-xs text-slate-400">Following</div>
               </button>
+            </div>
+
+            {/* Useful Activity Strip */}
+            <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Media Overview</p>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-2">
+                    <p className="text-lg font-bold text-slate-100">{standardPosts.length}</p>
+                    <p className="text-[11px] text-slate-400">Posts</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-2">
+                    <p className="text-lg font-bold text-slate-100">{reelPosts.length}</p>
+                    <p className="text-[11px] text-slate-400">Reels</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-2">
+                    <p className="text-lg font-bold text-slate-100">{taggedPosts.length}</p>
+                    <p className="text-[11px] text-slate-400">Tagged</p>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-700 bg-slate-900/70 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Learning Snapshot</p>
+                <div className="mt-3 space-y-2 text-sm text-slate-300">
+                  <p className="flex items-center justify-between"><span>Courses created</span><span className="font-semibold text-slate-100">{createdCourses.length}</span></p>
+                  <p className="flex items-center justify-between"><span>Courses enrolled</span><span className="font-semibold text-slate-100">{enrolledCourses.length}</span></p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('courses');
+                      setCourseSubTab('enrolled');
+                    }}
+                    className="mt-1 w-full rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700 transition-colors"
+                  >
+                    Continue learning
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Action Buttons */}
             {!isOwnProfile && (
-              <div className="flex justify-center gap-4 mb-8">
+              <div className="flex flex-wrap justify-center gap-3">
                 {isFollowing ? (
                   <button
                     onClick={handleUnfollow}
-                    className="px-8 py-3 bg-white hover:bg-gray-100 text-gray-800 rounded-2xl font-semibold flex items-center gap-2 border-2 border-gray-300 shadow-lg hover:shadow-xl transition-all"
+                    className="inline-flex items-center gap-2 rounded-2xl border border-slate-600 bg-slate-900 px-5 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800"
                   >
-                    <UserMinus className="w-5 h-5" />
+                    <UserMinus className="w-4 h-4" />
                     Unfollow
                   </button>
                 ) : (
                   <button
                     onClick={handleFollow}
-                    className="px-8 py-3 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-700 hover:via-purple-700 hover:to-pink-700 text-white rounded-2xl font-semibold flex items-center gap-2 shadow-lg shadow-indigo-300/50 hover:shadow-xl hover:scale-105 transition-all"
+                    className="inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-sky-500"
                   >
-                    <UserPlus className="w-5 h-5" />
+                    <UserPlus className="w-4 h-4" />
                     Follow
                   </button>
                 )}
                 <button
                   onClick={() => navigate('/messages')}
-                  className="px-8 py-3 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-700 hover:via-purple-700 hover:to-pink-700 text-white rounded-2xl font-semibold shadow-lg shadow-indigo-300/50 hover:shadow-xl hover:scale-105 transition-all"
+                  className="rounded-2xl border border-slate-600 bg-slate-900 px-5 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800"
                 >
                   Message
                 </button>
@@ -902,92 +957,70 @@ const ProfilePage = () => {
 
       {/* Tabs Section */}
       <div className="w-full px-4 sm:px-6 lg:px-8 mt-6 sm:mt-8 max-w-full" style={{width: '100%', maxWidth: 'none'}}>
-        <div className="flex justify-center gap-6 sm:gap-8 md:gap-12 border-b border-indigo-100">
+        <div className="mx-auto flex w-full max-w-3xl justify-center gap-2 rounded-2xl border border-slate-700 bg-slate-900/70 p-2">
           <button
-            onClick={() => setActiveTab('gallery')}
-            className={`relative pb-3 sm:pb-4 px-1 sm:px-2 font-semibold text-sm sm:text-base transition-all ${
-              activeTab === 'gallery'
-                ? 'text-indigo-600'
-                : 'text-gray-500 hover:text-gray-700'
+            onClick={() => setActiveTab('media')}
+            className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${
+              activeTab === 'media'
+                ? 'bg-slate-800 text-sky-300'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
             }`}
           >
-            <div className="flex items-center gap-1 sm:gap-2">
-              <Grid3x3 className="w-4 h-4 sm:w-5 sm:h-5" />
-              <span className="hidden xs:inline">Gallery</span>
+            <div className="flex items-center justify-center gap-2">
+              <Grid3x3 className="w-4 h-4" />
+              <span>Media</span>
             </div>
-            {activeTab === 'gallery' && (
-              <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 rounded-full shadow-lg"></div>
-            )}
           </button>
           <button
             onClick={() => setActiveTab('courses')}
-            className={`relative pb-3 sm:pb-4 px-1 sm:px-2 font-semibold text-sm sm:text-base transition-all ${
+            className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${
               activeTab === 'courses'
-                ? 'text-indigo-600'
-                : 'text-gray-500 hover:text-gray-700'
+                ? 'bg-slate-800 text-sky-300'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
             }`}
           >
-            <div className="flex items-center gap-1 sm:gap-2">
-              <BookOpen className="w-4 h-4 sm:w-5 sm:h-5" />
-              <span className="hidden xs:inline">Courses</span>
+            <div className="flex items-center justify-center gap-2">
+              <BookOpen className="w-4 h-4" />
+              <span>Courses</span>
             </div>
-            {activeTab === 'courses' && (
-              <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 rounded-full shadow-lg"></div>
-            )}
           </button>
         </div>
       </div>
 
       {/* Content Section */}
       <div className="w-full px-4 sm:px-6 lg:px-8 py-8 max-w-full" style={{width: '100%', maxWidth: 'none'}}>
-        {/* Gallery Tab */}
-        {activeTab === "gallery" && (
-          <div>
-            {/* Media Type Tabs */}
-            <div className="flex justify-center gap-6 mb-8">
-              <button
-                onClick={() => setMediaTab('all')}
-                className={`px-6 py-3 rounded-2xl font-semibold text-sm transition-all ${
-                  mediaTab === 'all'
-                    ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Grid3x3 className="w-4 h-4" />
-                  All Posts
-                </div>
-              </button>
-              <button
-                onClick={() => setMediaTab('vibes')}
-                className={`px-6 py-3 rounded-2xl font-semibold text-sm transition-all ${
-                  mediaTab === 'vibes'
-                    ? 'bg-gradient-to-r from-pink-500 to-orange-500 text-white shadow-lg'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4" />
-                  Vibes
-                  <span className="text-xs opacity-75">(Reels)</span>
-                </div>
-              </button>
-              <button
-                onClick={() => setMediaTab('streams')}
-                className={`px-6 py-3 rounded-2xl font-semibold text-sm transition-all ${
-                  mediaTab === 'streams'
-                    ? 'bg-gradient-to-r from-blue-500 to-cyan-500 text-white shadow-lg'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <Video className="w-4 h-4" />
-                  Streams
-                  <span className="text-xs opacity-75">(Videos)</span>
-                </div>
-              </button>
-            </div>
+        {activeTab === 'media' && (
+          <div className="mb-6 mx-auto flex w-full max-w-3xl gap-2 rounded-2xl border border-slate-700 bg-slate-900/70 p-2">
+            <button
+              onClick={() => setMediaTab('posts')}
+              className={`flex-1 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
+                mediaTab === 'posts' ? 'bg-slate-800 text-sky-300' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+              }`}
+            >
+              Posts
+            </button>
+            <button
+              onClick={() => setMediaTab('reels')}
+              className={`flex-1 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
+                mediaTab === 'reels' ? 'bg-slate-800 text-sky-300' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+              }`}
+            >
+              Reels
+            </button>
+            <button
+              onClick={() => setMediaTab('tagged')}
+              className={`flex-1 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
+                mediaTab === 'tagged' ? 'bg-slate-800 text-sky-300' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+              }`}
+            >
+              Tagged
+            </button>
+          </div>
+        )}
 
+        {/* Posts Tab */}
+        {activeTab === "media" && mediaTab === "posts" && (
+          <div>
             {/* Content Grid */}
             <div>
             {(() => {
@@ -1020,12 +1053,7 @@ const ProfilePage = () => {
                 );
               }
 
-              // Filter posts based on media type
-              const filteredPosts = mediaTab === 'all'
-                ? posts
-                : mediaTab === 'vibes'
-                ? posts.filter(post => post.mediaType === 'reel' || (post.mediaType === 'video' && post.videoDuration && post.videoDuration <= 120))
-                : posts.filter(post => post.mediaType === 'video' && (!post.videoDuration || post.videoDuration > 120));
+              const filteredPosts = standardPosts;
 
               return loading ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -1034,25 +1062,20 @@ const ProfilePage = () => {
                   ))}
                 </div>
               ) : filteredPosts.length === 0 ? (
-                <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-xl border border-indigo-100 p-12 text-center">
-                  <div className="w-20 h-20 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-3xl flex items-center justify-center mx-auto mb-6">
-                    <ImageIcon className="w-10 h-10 text-indigo-600" />
+                <div className="rounded-3xl border border-slate-700 bg-slate-900/60 p-12 text-center">
+                  <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl border border-slate-700 bg-slate-800">
+                    <ImageIcon className="w-10 h-10 text-slate-300" />
                   </div>
-                  <h3 className="text-2xl font-bold text-gray-800 mb-3">
-                    {mediaTab === 'all'
-                      ? (isOwnProfile ? "You haven't posted yet" : "No posts yet")
-                      : mediaTab === 'vibes'
-                      ? (isOwnProfile ? "You haven't shared any vibes yet" : "No vibes yet")
-                      : (isOwnProfile ? "You haven't uploaded any streams yet" : "No streams yet")
-                    }
+                  <h3 className="mb-3 text-2xl font-bold text-slate-100">
+                    {isOwnProfile ? "You haven't posted yet" : "No posts yet"}
                   </h3>
-                  <p className="text-gray-600 mb-8">
-                    {isOwnProfile ? "Share your musical journey with others!" : `This user hasn't shared any ${mediaTab === 'vibes' ? 'vibes' : mediaTab === 'streams' ? 'streams' : 'posts'} yet.`}
+                  <p className="mb-8 text-slate-400">
+                    {isOwnProfile ? "Share your musical journey with others." : "This user has not shared posts yet."}
                   </p>
                   {isOwnProfile && (
                     <button
                       onClick={() => navigate('/home')}
-                      className="px-8 py-4 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white rounded-2xl font-semibold hover:shadow-xl transition-all hover:scale-105"
+                      className="rounded-2xl bg-sky-600 px-8 py-4 font-semibold text-white hover:bg-sky-500"
                     >
                       Create First Post
                     </button>
@@ -1125,6 +1148,205 @@ const ProfilePage = () => {
           </div>
         )}
 
+        {/* Reels Tab */}
+        {activeTab === "media" && mediaTab === "reels" && (
+          <div>
+            {(() => {
+              const isPrivateAccount = userProfile?.isPrivate === true;
+              const isFollowingUser = userProfile?.followers?.includes(currentUserId) || false;
+              if (!isOwnProfile && isPrivateAccount && !isFollowingUser) {
+                return (
+                  <div className="rounded-3xl border border-slate-700 bg-slate-900/60 p-12 text-center">
+                    <div className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full border border-slate-700 bg-slate-800">
+                      <User className="h-12 w-12 text-slate-400" />
+                    </div>
+                    <h3 className="mb-3 text-3xl font-bold text-slate-100">This Account is Private</h3>
+                    <p className="mb-8 text-lg text-slate-400">Follow this account to see their reels.</p>
+                    <button
+                      onClick={handleFollow}
+                      className="mx-auto inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-8 py-4 font-bold text-white hover:bg-sky-500"
+                    >
+                      <UserPlus className="w-5 h-5" />
+                      Follow to View Reels
+                    </button>
+                  </div>
+                );
+              }
+
+              const reelPostsLocal = reelPosts;
+
+              if (loading) {
+                return (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    {[1, 2, 3, 4, 5, 6].map((i) => (
+                      <div key={i} className="aspect-square rounded-2xl bg-slate-800 animate-pulse"></div>
+                    ))}
+                  </div>
+                );
+              }
+
+              if (reelPostsLocal.length === 0) {
+                return (
+                  <div className="rounded-3xl border border-slate-700 bg-slate-900/60 p-12 text-center">
+                    <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl border border-slate-700 bg-slate-800">
+                      <Film className="w-10 h-10 text-slate-300" />
+                    </div>
+                    <h3 className="mb-3 text-2xl font-bold text-slate-100">
+                      {isOwnProfile ? "You haven't posted reels yet" : "No reels yet"}
+                    </h3>
+                    <p className="mb-8 text-slate-400">
+                      {isOwnProfile ? "Share a vibe to appear here." : "This user has not shared reels yet."}
+                    </p>
+                    {isOwnProfile && (
+                      <button
+                        onClick={() => navigate('/home')}
+                        className="rounded-2xl bg-sky-600 px-8 py-4 font-semibold text-white hover:bg-sky-500"
+                      >
+                        Create First Reel
+                      </button>
+                    )}
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {reelPostsLocal.map((post, index) => (
+                    <MagneticCard
+                      key={post.id}
+                      className="post-card relative group cursor-pointer overflow-hidden rounded-2xl shadow-lg hover:shadow-2xl transition-all aspect-square"
+                    >
+                      {post.imageUrl ? (
+                        <LazyImage
+                          src={post.imageUrl}
+                          alt="Reel"
+                          className="w-full h-full object-cover"
+                          onClick={() => {
+                            setViewerPosts(reelPostsLocal);
+                            setCurrentPostIndex(index);
+                            setShowPostViewer(true);
+                          }}
+                        />
+                      ) : (
+                        <div
+                          className="w-full h-full bg-slate-800 flex items-center justify-center"
+                          onClick={() => {
+                            setViewerPosts(reelPostsLocal);
+                            setCurrentPostIndex(index);
+                            setShowPostViewer(true);
+                          }}
+                        >
+                          <Film className="w-16 h-16 text-slate-500" />
+                        </div>
+                      )}
+
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
+                        <div className="text-white flex items-center gap-6 text-sm font-semibold w-full justify-center">
+                          <div className="flex items-center gap-2">
+                            <Heart className="w-5 h-5 fill-white" />
+                            <span>{post.likes?.length || 0}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <MessageCircle className="w-5 h-5 fill-white" />
+                            <span>{post.comments?.length || 0}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </MagneticCard>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {/* Tagged Tab */}
+        {activeTab === "media" && mediaTab === "tagged" && (
+          <div>
+            {(() => {
+              const isPrivateAccount = userProfile?.isPrivate === true;
+              const isFollowingUser = userProfile?.followers?.includes(currentUserId) || false;
+              if (!isOwnProfile && isPrivateAccount && !isFollowingUser) {
+                return (
+                  <div className="rounded-3xl border border-slate-700 bg-slate-900/60 p-12 text-center">
+                    <div className="mx-auto mb-6 flex h-24 w-24 items-center justify-center rounded-full border border-slate-700 bg-slate-800">
+                      <User className="h-12 w-12 text-slate-400" />
+                    </div>
+                    <h3 className="mb-3 text-3xl font-bold text-slate-100">This Account is Private</h3>
+                    <p className="mb-8 text-lg text-slate-400">Follow this account to see tagged posts.</p>
+                    <button
+                      onClick={handleFollow}
+                      className="mx-auto inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-8 py-4 font-bold text-white hover:bg-sky-500"
+                    >
+                      <UserPlus className="w-5 h-5" />
+                      Follow to View Tagged Posts
+                    </button>
+                  </div>
+                );
+              }
+
+              if (loading) {
+                return (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    {[1, 2, 3, 4, 5, 6].map((i) => (
+                      <div key={i} className="aspect-square rounded-2xl bg-slate-800 animate-pulse"></div>
+                    ))}
+                  </div>
+                );
+              }
+
+              if (taggedPosts.length === 0) {
+                return (
+                  <div className="rounded-3xl border border-slate-700 bg-slate-900/60 p-12 text-center">
+                    <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl border border-slate-700 bg-slate-800">
+                      <Sparkles className="w-10 h-10 text-slate-300" />
+                    </div>
+                    <h3 className="mb-3 text-2xl font-bold text-slate-100">No tagged posts yet</h3>
+                    <p className="mb-8 text-slate-400">
+                      Posts where this profile is tagged will appear here.
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {taggedPosts.map((post, index) => (
+                    <MagneticCard
+                      key={post.id}
+                      className="post-card relative group cursor-pointer overflow-hidden rounded-2xl shadow-lg hover:shadow-2xl transition-all aspect-square"
+                    >
+                      {post.imageUrl ? (
+                        <LazyImage
+                          src={post.imageUrl}
+                          alt="Tagged post"
+                          className="w-full h-full object-cover"
+                          onClick={() => {
+                            setViewerPosts(taggedPosts);
+                            setCurrentPostIndex(index);
+                            setShowPostViewer(true);
+                          }}
+                        />
+                      ) : (
+                        <div
+                          className="w-full h-full bg-slate-800 flex items-center justify-center"
+                          onClick={() => {
+                            setViewerPosts(taggedPosts);
+                            setCurrentPostIndex(index);
+                            setShowPostViewer(true);
+                          }}
+                        >
+                          <ImageIcon className="w-16 h-16 text-slate-500" />
+                        </div>
+                      )}
+                    </MagneticCard>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
         {/* Courses Tab */}
         {activeTab === "courses" && (
           <div>
@@ -1161,32 +1383,26 @@ const ProfilePage = () => {
               return (
                 <>
             {/* Course Sub-tabs */}
-            <div className="flex gap-6 mb-8">
+            <div className="mb-8 flex w-full max-w-md gap-2 rounded-2xl border border-slate-700 bg-slate-900/70 p-2">
               <button
                 onClick={() => setCourseSubTab('created')}
-                className={`relative pb-3 px-2 font-semibold text-base transition-all ${
+                className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${
                   courseSubTab === 'created'
-                    ? 'text-indigo-600'
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'bg-slate-800 text-sky-300'
+                    : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
                 }`}
               >
                 Created ({createdCourses.length})
-                {courseSubTab === 'created' && (
-                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-indigo-600 to-purple-600 rounded-full"></div>
-                )}
               </button>
               <button
                 onClick={() => setCourseSubTab('enrolled')}
-                className={`relative pb-3 px-2 font-semibold text-base transition-all ${
+                className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${
                   courseSubTab === 'enrolled'
-                    ? 'text-indigo-600'
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'bg-slate-800 text-sky-300'
+                    : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
                 }`}
               >
                 Enrolled ({enrolledCourses.length})
-                {courseSubTab === 'enrolled' && (
-                  <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-purple-600 to-pink-600 rounded-full"></div>
-                )}
               </button>
             </div>
             
@@ -1194,20 +1410,20 @@ const ProfilePage = () => {
             {courseSubTab === 'created' && (
               <div>
                 {createdCourses.length === 0 ? (
-                  <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-xl border border-indigo-100 p-12 text-center">
-                    <div className="w-20 h-20 bg-gradient-to-br from-indigo-100 to-purple-100 rounded-3xl flex items-center justify-center mx-auto mb-6">
-                      <BookOpen className="w-10 h-10 text-indigo-600" />
+                  <div className="rounded-3xl border border-slate-700 bg-slate-900/60 p-12 text-center">
+                    <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl border border-slate-700 bg-slate-800">
+                      <BookOpen className="w-10 h-10 text-slate-300" />
                     </div>
-                    <h3 className="text-2xl font-bold text-gray-800 mb-3">
+                    <h3 className="text-2xl font-bold text-slate-100 mb-3">
                       {isOwnProfile ? "You haven't created any courses" : "No courses created"}
                     </h3>
-                    <p className="text-gray-600 mb-8">
+                    <p className="text-slate-400 mb-8">
                       {isOwnProfile ? "Share your knowledge by creating a course!" : "This user hasn't created any courses yet."}
                     </p>
                     {isOwnProfile && (
                       <button
                         onClick={() => navigate('/courses')}
-                        className="px-8 py-4 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white rounded-2xl font-semibold hover:shadow-xl transition-all hover:scale-105"
+                        className="rounded-2xl bg-sky-600 px-8 py-4 font-semibold text-white hover:bg-sky-500"
                       >
                         Create First Course
                       </button>
@@ -1218,17 +1434,17 @@ const ProfilePage = () => {
                     {createdCourses.map((course) => (
                       <div
                         key={course.id}
-                        className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-xl border border-indigo-100 p-6 hover:shadow-2xl transition-all group"
+                        className="rounded-3xl border border-slate-700 bg-slate-900/70 p-6 transition-all group hover:border-slate-600"
                       >
-                        <div className="w-full h-48 bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 rounded-2xl mb-4 flex items-center justify-center">
+                        <div className="w-full h-48 bg-slate-800 rounded-2xl mb-4 flex items-center justify-center border border-slate-700">
                           <BookOpen className="w-16 h-16 text-white" />
                         </div>
-                        <h3 className="text-xl font-bold text-gray-900 mb-2 group-hover:text-indigo-600 transition-colors">
+                        <h3 className="text-xl font-bold text-slate-100 mb-2 group-hover:text-sky-300 transition-colors">
                           {course.title}
                         </h3>
-                        <p className="text-gray-600 text-sm mb-4 line-clamp-2">{course.description}</p>
+                        <p className="text-slate-400 text-sm mb-4 line-clamp-2">{course.description}</p>
 
-                        <div className="flex items-center justify-between text-sm text-gray-500 mb-4">
+                        <div className="flex items-center justify-between text-sm text-slate-400 mb-4">
                           <div className="flex items-center gap-1">
                             <Users className="w-4 h-4" />
                             <span>{course.enrolledUsers?.length || 0} enrolled</span>
@@ -1237,7 +1453,7 @@ const ProfilePage = () => {
 
                         <button
                           onClick={() => navigate(`/course/${course.id}`)}
-                          className="w-full px-6 py-3 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-700 hover:via-purple-700 hover:to-pink-700 text-white rounded-2xl font-semibold shadow-lg hover:shadow-xl transition-all"
+                          className="w-full rounded-2xl bg-sky-600 px-6 py-3 font-semibold text-white hover:bg-sky-500 transition-colors"
                         >
                           Manage Course
                         </button>
@@ -1252,20 +1468,20 @@ const ProfilePage = () => {
             {courseSubTab === 'enrolled' && (
               <div>
                 {enrolledCourses.length === 0 ? (
-                  <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-xl border border-indigo-100 p-12 text-center">
-                    <div className="w-20 h-20 bg-gradient-to-br from-purple-100 to-pink-100 rounded-3xl flex items-center justify-center mx-auto mb-6">
-                      <BookOpen className="w-10 h-10 text-purple-600" />
+                  <div className="rounded-3xl border border-slate-700 bg-slate-900/60 p-12 text-center">
+                    <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl border border-slate-700 bg-slate-800">
+                      <BookOpen className="w-10 h-10 text-slate-300" />
                     </div>
-                    <h3 className="text-2xl font-bold text-gray-800 mb-3">
+                    <h3 className="text-2xl font-bold text-slate-100 mb-3">
                       {isOwnProfile ? "You haven't enrolled in any courses" : "Not enrolled in any courses"}
                     </h3>
-                    <p className="text-gray-600 mb-8">
+                    <p className="text-slate-400 mb-8">
                       {isOwnProfile ? "Start learning by enrolling in a course!" : "This user hasn't enrolled in any courses yet."}
                     </p>
                     {isOwnProfile && (
                       <button
                         onClick={() => navigate('/courses')}
-                        className="px-8 py-4 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-2xl font-semibold hover:shadow-xl transition-all hover:scale-105"
+                        className="rounded-2xl bg-sky-600 px-8 py-4 font-semibold text-white hover:bg-sky-500"
                       >
                         Browse Courses
                       </button>
@@ -1276,17 +1492,17 @@ const ProfilePage = () => {
                     {enrolledCourses.map((course) => (
                       <div
                         key={course.id}
-                        className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-xl border border-indigo-100 p-6 hover:shadow-2xl transition-all group"
+                        className="rounded-3xl border border-slate-700 bg-slate-900/70 p-6 transition-all group hover:border-slate-600"
                       >
-                        <div className="w-full h-48 bg-gradient-to-br from-purple-500 via-pink-500 to-orange-500 rounded-2xl mb-4 flex items-center justify-center">
+                        <div className="w-full h-48 bg-slate-800 rounded-2xl mb-4 flex items-center justify-center border border-slate-700">
                           <BookOpen className="w-16 h-16 text-white" />
                         </div>
-                        <h3 className="text-xl font-bold text-gray-900 mb-2 group-hover:text-purple-600 transition-colors">
+                        <h3 className="text-xl font-bold text-slate-100 mb-2 group-hover:text-sky-300 transition-colors">
                           {course.title}
                         </h3>
-                        <p className="text-gray-600 text-sm mb-4 line-clamp-2">{course.description}</p>
+                        <p className="text-slate-400 text-sm mb-4 line-clamp-2">{course.description}</p>
 
-                        <div className="flex items-center justify-between text-sm text-gray-500 mb-4">
+                        <div className="flex items-center justify-between text-sm text-slate-400 mb-4">
                           <div className="flex items-center gap-1">
                             <Users className="w-4 h-4" />
                             <span>{course.enrolledUsers?.length || 0} students</span>
@@ -1295,7 +1511,7 @@ const ProfilePage = () => {
 
                         <button
                           onClick={() => navigate(`/course/${course.id}`)}
-                          className="w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-2xl font-semibold shadow-lg hover:shadow-xl transition-all"
+                          className="w-full rounded-2xl bg-sky-600 px-6 py-3 font-semibold text-white hover:bg-sky-500 transition-colors"
                         >
                           Continue Learning
                         </button>
@@ -1873,6 +2089,37 @@ const ProfilePage = () => {
                   <p className="text-gray-500">No likes yet</p>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Logout Confirmation Modal */}
+      {showLogoutModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-3xl border border-slate-700 bg-slate-900 shadow-2xl">
+            <div className="px-6 py-5 border-b border-slate-700">
+              <h3 className="text-lg font-semibold text-slate-100">Log out?</h3>
+              <p className="mt-1 text-sm text-slate-400">You will need to sign in again to access your account.</p>
+            </div>
+            <div className="px-6 py-4 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowLogoutModal(false)}
+                className="rounded-xl border border-slate-600 bg-slate-900 px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setShowLogoutModal(false);
+                  await handleSignOut();
+                }}
+                className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500"
+              >
+                Logout
+              </button>
             </div>
           </div>
         </div>
