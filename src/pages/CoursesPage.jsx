@@ -3,20 +3,20 @@ import { useNavigate } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
-  auth, createCourse, getCourses, getEnrolledCourses,
+  auth, getCourses, getEnrolledCourses,
   enrollInCourse, unenrollFromCourse,
 } from '../firebase';
 import {
-  BookOpen, PlusCircle, UserPlus, UserMinus, Users, GraduationCap,
-  Award, Compass, Search, Sparkles, ArrowRight, ArrowLeft, Library,
-  X, ChevronRight, Clock,
+  BookOpen, UserPlus, UserMinus, Users, GraduationCap,
+  Award, Compass, Search, ArrowRight, ArrowLeft, Library,
+  ChevronRight, Clock,
 } from 'lucide-react';
 
 const TAB_KEYS = ['explore', 'my', 'enrolled'];
 const TAB_CONFIG = {
-  explore:  { label: 'Explore',   Icon: Compass,       headline: 'Discover courses',         sub: 'Browse and enroll in community courses.' },
-  my:       { label: 'My Courses', Icon: Award,         headline: 'Your teaching studio',     sub: 'Courses you host — manage content and students.' },
-  enrolled: { label: 'Enrolled',   Icon: Library,       headline: 'Continue learning',        sub: 'Every course you have joined.' },
+  explore:  { label: 'Explore',    Icon: Compass,  headline: 'Discover courses',     sub: 'Browse and enroll in community courses.' },
+  my:       { label: 'My Courses', Icon: Award,    headline: 'Your teaching studio', sub: 'Courses you host — manage content and students.' },
+  enrolled: { label: 'Enrolled',   Icon: Library,  headline: 'Continue learning',    sub: 'Every course you have joined.' },
 };
 
 const ACCENTS = [
@@ -119,7 +119,6 @@ const CourseCard = ({ course, index, userId, isEnrolledFn, onEnroll, onUnenroll 
           </div>
 
           <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-            {/* Unenroll (enrolled non-creator) */}
             {enrolled && !isMine && (
               <button
                 onClick={unenroll}
@@ -131,7 +130,6 @@ const CourseCard = ({ course, index, userId, isEnrolledFn, onEnroll, onUnenroll 
               </button>
             )}
 
-            {/* Enroll (not enrolled, not creator) */}
             {!enrolled && !isMine && (
               <button
                 onClick={enroll}
@@ -145,7 +143,6 @@ const CourseCard = ({ course, index, userId, isEnrolledFn, onEnroll, onUnenroll 
               </button>
             )}
 
-            {/* Open (enrolled or creator) */}
             <button
               onClick={openCourse}
               className="flex items-center gap-1 rounded-xl border border-slate-700 hover:border-sky-500/50 hover:bg-sky-500/5 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:text-sky-300 transition-all duration-200"
@@ -163,17 +160,13 @@ const CourseCard = ({ course, index, userId, isEnrolledFn, onEnroll, onUnenroll 
 /* ── Page ──────────────────────────────────────────────────────────────────── */
 const CoursesPage = () => {
   const navigate = useNavigate();
-  const [userId,      setUserId]      = useState(null);
-  const [tab,         setTab]         = useState('explore');
-  const [courses,     setCourses]     = useState([]);
-  const [myCourses,   setMyCourses]   = useState([]);
-  const [enrolled,    setEnrolled]    = useState([]);
-  const [loading,     setLoading]     = useState(true);
-  const [showCreate,  setShowCreate]  = useState(false);
-  const [title,       setTitle]       = useState('');
-  const [description, setDescription] = useState('');
-  const [search,      setSearch]      = useState('');
-  const [creating,    setCreating]    = useState(false);
+  const [userId,    setUserId]    = useState(null);
+  const [tab,       setTab]       = useState('explore');
+  const [courses,   setCourses]   = useState([]);
+  const [myCourses, setMyCourses] = useState([]);
+  const [enrolled,  setEnrolled]  = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [search,    setSearch]    = useState('');
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, u => setUserId(u?.uid || null));
@@ -194,23 +187,6 @@ const CoursesPage = () => {
     };
     load();
   }, [userId]);
-
-  useEffect(() => {
-    if (!showCreate) return;
-    const fn = e => { if (e.key === 'Escape') setShowCreate(false); };
-    window.addEventListener('keydown', fn);
-    return () => window.removeEventListener('keydown', fn);
-  }, [showCreate]);
-
-  const handleCreate = async () => {
-    if (!title.trim()) return;
-    setCreating(true);
-    try {
-      const id = await createCourse({ title, description, creatorId: userId });
-      setShowCreate(false); setTitle(''); setDescription('');
-      navigate(`/course/${id}`);
-    } finally { setCreating(false); }
-  };
 
   const handleEnroll = async courseId => {
     if (!userId) return;
@@ -247,9 +223,8 @@ const CoursesPage = () => {
 
   const empty = useMemo(() => {
     if (search.trim()) return { title: 'No matches', hint: 'Try a different keyword.', action: () => setSearch(''), actionLabel: 'Clear search' };
-    if (tab === 'explore')  return { title: 'Nothing here yet', hint: 'Be the first to publish a course.', action: () => setShowCreate(true), actionLabel: 'Create a course' };
-    if (tab === 'my')       return { title: 'No courses yet', hint: 'Launch your first course.', action: () => setShowCreate(true), actionLabel: 'Create your first course' };
-    return { title: 'Not enrolled anywhere', hint: 'Browse the catalog and join a course.', action: () => goTab('explore'), actionLabel: 'Browse courses' };
+    if (tab === 'enrolled') return { title: 'Not enrolled anywhere', hint: 'Browse the catalog and join a course.', action: () => goTab('explore'), actionLabel: 'Browse courses' };
+    return { title: 'Nothing here yet', hint: 'No courses available right now.', action: () => goTab('explore'), actionLabel: 'Browse all courses' };
   }, [tab, search]);
 
   return (
@@ -258,42 +233,38 @@ const CoursesPage = () => {
         <title>Courses | InstruMentor</title>
       </Helmet>
 
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 text-slate-100" style={{ width: '100%', maxWidth: 'none' }}>
-
+      <div
+        className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 text-slate-100"
+        style={{ width: '100%', maxWidth: 'none' }}
+      >
         {/* ── Header ── */}
         <div className="relative overflow-hidden border-b border-slate-800/80">
           <div className="pointer-events-none absolute -top-24 -right-24 w-80 h-80 rounded-full bg-sky-600/8 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-16 -left-16 w-64 h-64 rounded-full bg-violet-600/6 blur-3xl" />
 
           <div className="relative w-full px-4 sm:px-6 py-5 sm:py-7" style={{ width: '100%', maxWidth: 'none' }}>
-            <button onClick={() => navigate('/')}
-              className="mb-4 inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-slate-600 hover:text-slate-100 transition-all duration-200 group">
+            <button
+              onClick={() => navigate('/')}
+              className="mb-4 inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-slate-600 hover:text-slate-100 transition-all duration-200 group"
+            >
               <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform duration-200" />
               Back
             </button>
 
-            <div className="flex items-start justify-between gap-4 mb-6">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-sky-600/30 to-cyan-600/30 border border-sky-500/20 flex items-center justify-center shrink-0">
-                  <TabIcon className="w-6 h-6 text-sky-300" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Courses</span>
-                    <span className="text-xs text-slate-600">·</span>
-                    <span className="text-xs text-slate-500">{loading ? '…' : `${list.length}`}</span>
-                  </div>
-                  <h1 className="text-xl sm:text-2xl font-bold text-slate-50">{cfg.headline}</h1>
-                  <p className="text-slate-400 text-sm mt-0.5 hidden sm:block">{cfg.sub}</p>
-                </div>
+            {/* Title row — no create button */}
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-sky-600/30 to-cyan-600/30 border border-sky-500/20 flex items-center justify-center shrink-0">
+                <TabIcon className="w-6 h-6 text-sky-300" />
               </div>
-
-              <button onClick={() => setShowCreate(true)}
-                className="shrink-0 flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-sky-900/25 transition-all duration-200">
-                <Sparkles className="w-4 h-4" />
-                <span className="hidden sm:inline">Create Course</span>
-                <span className="sm:hidden">Create</span>
-              </button>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Courses</span>
+                  <span className="text-xs text-slate-600">·</span>
+                  <span className="text-xs text-slate-500">{loading ? '…' : `${list.length}`}</span>
+                </div>
+                <h1 className="text-xl sm:text-2xl font-bold text-slate-50">{cfg.headline}</h1>
+                <p className="text-slate-400 text-sm mt-0.5 hidden sm:block">{cfg.sub}</p>
+              </div>
             </div>
 
             {/* Tabs */}
@@ -302,7 +273,9 @@ const CoursesPage = () => {
                 const { label, Icon: TIcon } = TAB_CONFIG[key];
                 const active = tab === key;
                 return (
-                  <button key={key} onClick={() => goTab(key)}
+                  <button
+                    key={key}
+                    onClick={() => goTab(key)}
                     className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold whitespace-nowrap transition-all duration-200 ${
                       active
                         ? 'bg-sky-500/15 border border-sky-500/30 text-sky-300'
@@ -344,8 +317,10 @@ const CoursesPage = () => {
               </div>
               <p className="font-bold text-slate-200 text-lg mb-1">{empty.title}</p>
               <p className="text-slate-400 text-sm mb-6 max-w-xs">{empty.hint}</p>
-              <button onClick={empty.action}
-                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-sky-900/20 transition-all duration-200">
+              <button
+                onClick={empty.action}
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-sky-900/20 transition-all duration-200"
+              >
                 {empty.actionLabel} <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -366,62 +341,6 @@ const CoursesPage = () => {
           )}
         </div>
       </div>
-
-      {/* ── Create modal ── */}
-      {showCreate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-3xl border border-slate-700 bg-slate-900 shadow-2xl shadow-black/60 overflow-hidden">
-            {/* modal header */}
-            <div className="flex items-center justify-between px-6 py-5 border-b border-slate-700/60">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center">
-                  <Sparkles className="w-4 h-4 text-sky-400" />
-                </div>
-                <h2 className="font-bold text-slate-100">Create New Course</h2>
-              </div>
-              <button onClick={() => setShowCreate(false)}
-                className="p-1.5 rounded-xl hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-colors">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Course Title *</label>
-                <input
-                  value={title}
-                  onChange={e => setTitle(e.target.value)}
-                  placeholder="e.g. Beginner Guitar Fundamentals"
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500/60 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Description</label>
-                <textarea
-                  value={description}
-                  onChange={e => setDescription(e.target.value)}
-                  placeholder="What will students learn?"
-                  rows={4}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500/60 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition resize-none"
-                />
-              </div>
-              <div className="flex gap-3 pt-2">
-                <button onClick={() => setShowCreate(false)}
-                  className="flex-1 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 py-2.5 text-sm font-semibold text-slate-300 transition-colors">
-                  Cancel
-                </button>
-                <button onClick={handleCreate} disabled={!title.trim() || creating}
-                  className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 disabled:opacity-50 py-2.5 text-sm font-semibold text-white shadow-lg shadow-sky-900/20 transition-all duration-200">
-                  {creating
-                    ? <div className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                    : <PlusCircle className="w-4 h-4" />}
-                  {creating ? 'Creating…' : 'Create Course'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 };

@@ -55,30 +55,38 @@ That split keeps the durable social/learning data simple and consistent while le
 ## Architecture
 
 ```
-┌──────────────────────────────┐
-│        React 19 SPA           │
-│  Vite 6 · Tailwind 4 · Router  │
-│  Route-level code splitting    │
-└───────────────┬───────────────┘
-                 │
-        ┌────────┴────────┐
-        │                 │
-        ▼                 ▼
-┌──────────────────┐   ┌──────────────────────────────┐
-│     Firebase       │   │   Node + Express + Socket.IO   │
-│ Auth / Firestore /  │   │   "real-time" server (server/) │
-│ Realtime DB / Storage│  │   • room & participant state   │
-│                     │   │   • chat history (in-memory)   │
-│ system of record    │   │   • WebRTC signaling           │
-│ for users, posts,    │   └───────────────┬───────────────┘
-│ courses, resources   │                   │ signaling (offer/answer/ICE)
-└──────────────────┘                       ▼
-                                ┌───────────────────────────┐
-                                │   Mesh WebRTC peer links     │
-                                │ RTCPeerConnection / simple-peer│
-                                │ audio + video flow directly    │
-                                │ between participants' browsers │
-                                └───────────────────────────┘
+┌──────────────────────────────────────────────┐
+│                 React 19 SPA                 │
+│        Vite 6 · Tailwind 4 · Router          │
+│        Route-level Code Splitting            │
+└───────────────────┬──────────────────────────┘
+                    │
+        ┌───────────┴───────────┐
+        │                       │
+        ▼                       ▼
+
+┌──────────────────────┐   ┌──────────────────────────────────┐
+│       Firebase       │   │    Node + Express + Socket.IO    │
+│                      │   │    "real-time" server (server/)  │
+│ • Authentication     │   │                                  │
+│ • Firestore          │   │ • Room & participant state       │
+│ • Realtime Database  │   │ • Chat history (in-memory)       │
+│ • Storage            │   │ • WebRTC signaling               │
+│                      │   │                                  │
+│ System of record for │   └───────────────┬──────────────────┘
+│ users, posts,        │                   │
+│ courses, resources   │                   │ Signaling
+└──────────────────────┘                   │ (Offer/Answer/ICE)
+                                           ▼
+
+                           ┌──────────────────────────────────┐
+                           │      Mesh WebRTC Peer Links      │
+                           │                                  │
+                           │ • RTCPeerConnection              │
+                           │ • simple-peer                    │
+                           │ • Audio + Video streams          │
+                           │ • Browser-to-browser media       │
+                           └──────────────────────────────────┘
 ```
 
 **Why split it this way?** Firebase's client SDKs are already great at realtime listeners for *data* (posts, comments, profile updates). What they don't give you is low-latency signaling for WebRTC or transient room state that shouldn't be written to a database at all (who's currently muted, who raised a hand). The Socket.IO server exists specifically to fill that gap — it's deliberately small and stateless across restarts.

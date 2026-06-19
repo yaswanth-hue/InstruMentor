@@ -7,250 +7,217 @@ import {
   enrollInCourse,
   unenrollFromCourse,
 } from '../firebase';
-import { Users, GraduationCap, Award, BookOpen, Calendar, ArrowLeft, UserPlus, UserMinus, Sparkles, TrendingUp } from 'lucide-react';
+import {
+  Users, GraduationCap, Award, BookOpen, ArrowLeft,
+  UserPlus, UserMinus, Sparkles, Check, Clock
+} from 'lucide-react';
 import CourseContentHub from '../components/CourseContentHub';
+
+const fmtMonth = raw => {
+  const d = raw?.toDate ? raw.toDate() : new Date(raw);
+  return isNaN(d) ? '—' : d.toLocaleDateString([], { month: 'short', year: 'numeric' });
+};
 
 const CourseDetailPage = () => {
   const { courseId } = useParams();
-  const navigate = useNavigate();
-  const userId = auth.currentUser?.uid;
-  const userEmail = auth.currentUser?.email;
-  const [course, setCourse] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const isCreator = useMemo(() => course && course.creatorId === userId, [course, userId]);
-  const isEnrolled = useMemo(
-    () => !!course && (course.enrolledUsers || []).includes(userId),
-    [course, userId]
-  );
+  const navigate     = useNavigate();
+  const userId       = auth.currentUser?.uid;
+
+  const [course,    setCourse]    = useState(null);
+  const [loading,   setLoading]   = useState(true);
+  const [enrolling, setEnrolling] = useState(false);
+
+  const isCreator  = useMemo(() => course && course.creatorId === userId, [course, userId]);
+  const isEnrolled = useMemo(() => !!course && (course.enrolledUsers || []).includes(userId), [course, userId]);
 
   const load = async () => {
     setLoading(true);
-    try {
-      const c = await getCourseById(courseId);
-      setCourse(c);
-    } finally {
-      setLoading(false);
-    }
+    try { setCourse(await getCourseById(courseId)); }
+    finally { setLoading(false); }
   };
 
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [courseId]);
+  useEffect(() => { load(); }, [courseId]);
 
   const handleEnroll = async () => {
-    await enrollInCourse(courseId, userId);
-    await load();
+    setEnrolling(true);
+    try { await enrollInCourse(courseId, userId); await load(); }
+    finally { setEnrolling(false); }
   };
 
   const handleUnenroll = async () => {
-    await unenrollFromCourse(courseId, userId);
-    await load();
+    setEnrolling(true);
+    try { await unenrollFromCourse(courseId, userId); await load(); }
+    finally { setEnrolling(false); }
   };
 
-  const canAccessMaterials = isCreator || isEnrolled;
+  const getEnrolledEmails = () =>
+    (course?.enrolledUsers || []).map(uid => `user-${uid}@email.com`);
 
-  // Get enrolled emails for the meeting scheduler
-  const getEnrolledEmails = () => {
-    if (!course || !course.enrolledUsers) return [];
-    // This is a simplified version - in production, you'd fetch actual emails from user profiles
-    return course.enrolledUsers.map(uid => `user-${uid}@email.com`);
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 flex items-center justify-center" style={{width: '100%', maxWidth: 'none'}}>
-        <div className="flex flex-col items-center">
-          <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-sky-500"></div>
-          <p className="mt-4 text-slate-300 font-medium">Loading course details...</p>
-        </div>
+  /* ── Loading ── */
+  if (loading) return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 flex items-center justify-center" style={{ width: '100%', maxWidth: 'none' }}>
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 rounded-full border-2 border-sky-500/30 border-t-sky-500 animate-spin" />
+        <p className="text-slate-400 text-sm">Loading course…</p>
       </div>
-    );
-  }
+    </div>
+  );
 
-  if (!course) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 flex items-center justify-center" style={{width: '100%', maxWidth: 'none'}}>
-        <div className="text-center">
-          <div className="bg-slate-800 rounded-full p-6 shadow-lg mb-4 inline-block border border-slate-700">
-            <BookOpen className="w-16 h-16 text-slate-400" />
-          </div>
-          <p className="text-xl text-slate-200 font-medium">Course not found</p>
-          <button
-            onClick={() => navigate('/courses')}
-            className="mt-4 px-6 py-3 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 text-white font-semibold hover:shadow-lg transition-all duration-300"
-          >
-            Back to Courses
-          </button>
+  /* ── Not found ── */
+  if (!course) return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 flex items-center justify-center p-4" style={{ width: '100%', maxWidth: 'none' }}>
+      <div className="text-center">
+        <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center mx-auto mb-4">
+          <BookOpen className="w-7 h-7 text-slate-500" />
         </div>
+        <h2 className="text-xl font-bold text-slate-200 mb-4">Course not found</h2>
+        <button onClick={() => navigate('/courses')}
+          className="px-6 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-sm font-semibold transition-colors duration-200">
+          Back to Courses
+        </button>
       </div>
-    );
-  }
+    </div>
+  );
+
+  const canAccess = isCreator || isEnrolled;
 
   return (
     <>
       <Helmet>
-        <title>{course?.title || 'Course'} | InstruMentor</title>
-        <meta name="description" content={course?.description || `Learn music with ${course?.title || 'this course'} on InstruMentor. Enroll now and master your instrument!`} />
-        <meta property="og:title" content={`${course?.title || 'Course'} | InstruMentor`} />
-        <meta property="og:description" content={course?.description || 'Learn music on InstruMentor'} />
-        <meta property="og:type" content="website" />
-        <meta property="og:url" content={typeof window !== 'undefined' ? window.location.href : ''} />
-        <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content={`${course?.title || 'Course'} | InstruMentor`} />
-        <meta name="twitter:description" content={course?.description || 'Learn music on InstruMentor'} />
+        <title>{course.title} | InstruMentor</title>
+        <meta name="description" content={course.description || `Learn with ${course.title} on InstruMentor.`} />
       </Helmet>
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 text-slate-100" style={{width: '100%', maxWidth: 'none'}}>
-      {/* Hero Section with Gradient Background */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 shadow-lg relative overflow-hidden border-b border-sky-300/20">
-        {/* Decorative background elements */}
-        <div className="absolute inset-0 bg-black/30"></div>
-        <div className="absolute top-0 right-0 w-96 h-96 bg-sky-500/20 rounded-full blur-3xl"></div>
-        <div className="absolute bottom-0 left-0 w-96 h-96 bg-cyan-500/20 rounded-full blur-3xl"></div>
 
-        <div className="relative w-full px-4 sm:px-6 py-8 sm:py-12" style={{width: '100%', maxWidth: 'none'}}>
-          {/* Back Button */}
-          <button
-            onClick={() => navigate('/courses')}
-            className="mb-6 inline-flex items-center gap-1.5 rounded-lg border border-sky-300/30 bg-slate-900/80 px-2.5 py-1.5 text-xs font-medium text-slate-200 transition-all duration-300 hover:border-sky-300/60 hover:bg-slate-800 group"
-          >
-            <ArrowLeft className="h-3.5 w-3.5 group-hover:-translate-x-1 transition-transform duration-300" />
-            <span>Back</span>
-          </button>
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 text-slate-100" style={{ width: '100%', maxWidth: 'none' }}>
 
-          {/* Course Header */}
-          <div className="flex items-start gap-4 mb-6">
-            <div className="bg-slate-800/80 backdrop-blur-sm p-4 rounded-2xl shadow-lg border border-sky-300/20">
-              <GraduationCap className="w-10 h-10 sm:w-12 sm:h-12 text-white" />
-            </div>
-            <div className="flex-1">
-              <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold text-slate-100 drop-shadow-lg mb-3 animate-fadeIn">
-                {course.title}
-              </h1>
-              <p className="text-lg text-slate-300 leading-relaxed max-w-3xl animate-slideDown">
-                {course.description || 'Explore this amazing course and enhance your skills!'}
-              </p>
-            </div>
-          </div>
+        {/* ── Hero ── */}
+        <div className="relative overflow-hidden border-b border-slate-800/80">
+          <div className="pointer-events-none absolute -top-24 -right-24 w-80 h-80 rounded-full bg-sky-600/8 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-16 -left-16 w-64 h-64 rounded-full bg-violet-600/6 blur-3xl" />
 
-          {/* Stats Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-8">
-            {/* Enrolled Students */}
-            <div className="bg-slate-900/70 backdrop-blur-md rounded-2xl p-5 border border-sky-300/20 hover:bg-slate-800/80 transition-all duration-300 hover:scale-105">
-              <div className="flex items-center gap-3">
-                <div className="bg-slate-800 p-3 rounded-xl border border-sky-300/20">
-                  <Users className="w-6 h-6 text-sky-300" />
-                </div>
-                <div>
-                  <p className="text-slate-400 text-sm font-medium">Enrolled Students</p>
-                  <p className="text-3xl font-bold text-slate-100">{course.enrolledUsers?.length || 0}</p>
-                </div>
+          <div className="relative w-full px-4 sm:px-6 py-5 sm:py-7">
+
+            {/* back */}
+            <button
+              onClick={() => navigate('/courses')}
+              className="mb-5 inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-slate-600 hover:text-slate-100 transition-all duration-200 group"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform duration-200" />
+              Back to Courses
+            </button>
+
+            {/* title row */}
+            <div className="flex items-start gap-4 mb-4">
+              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-sky-600/25 to-violet-600/25 border border-sky-500/20 flex items-center justify-center shrink-0">
+                <GraduationCap className="w-5 h-5 text-sky-300" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-slate-50 leading-tight">
+                  {course.title}
+                </h1>
+                {course.description && (
+                  <p className="text-slate-400 text-sm mt-1 leading-relaxed line-clamp-2">
+                    {course.description}
+                  </p>
+                )}
               </div>
             </div>
 
-            {/* Instructor Badge */}
-            {isCreator && (
-              <div className="bg-slate-900/70 backdrop-blur-md rounded-2xl p-5 border border-amber-300/30 hover:scale-105 transition-all duration-300">
-                <div className="flex items-center gap-3">
-                  <div className="bg-amber-500/20 p-3 rounded-xl border border-amber-300/30">
-                    <Award className="w-6 h-6 text-amber-200" />
-                  </div>
-                  <div>
-                    <p className="text-slate-300 text-sm font-medium">Your Role</p>
-                    <p className="text-2xl font-bold text-slate-100">Instructor</p>
-                  </div>
-                </div>
+            {/* meta row */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-5 pl-[60px]">
+              <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                <Users className="w-3.5 h-3.5" />
+                <span>{course.enrolledUsers?.length || 0} students</span>
               </div>
-            )}
-
-            {/* Status Badge */}
-            {!isCreator && (
-              <div className={`backdrop-blur-md rounded-2xl p-5 border transition-all duration-300 hover:scale-105 ${
-                isEnrolled
-                  ? 'bg-emerald-500/15 border-emerald-300/30'
-                  : 'bg-slate-900/70 border-sky-300/20'
-              }`}>
-                <div className="flex items-center gap-3">
-                  <div className={`p-3 rounded-xl border ${isEnrolled ? 'bg-emerald-500/20 border-emerald-300/30' : 'bg-slate-800 border-sky-300/20'}`}>
-                    {isEnrolled ? (
-                      <TrendingUp className="w-6 h-6 text-emerald-200" />
-                    ) : (
-                      <Sparkles className="w-6 h-6 text-sky-300" />
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-slate-300 text-sm font-medium">Status</p>
-                    <p className="text-2xl font-bold text-slate-100">
-                      {isEnrolled ? 'Enrolled' : 'Available'}
-                    </p>
-                  </div>
+              {course.createdAt && (
+                <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>Since {fmtMonth(course.createdAt)}</span>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
 
-          {/* Action Buttons */}
-          <div className="mt-8 flex flex-wrap gap-3">
-            {!isCreator && (
-              isEnrolled ? (
-                <button
-                  onClick={handleUnenroll}
-                  className="px-6 py-3 rounded-xl bg-slate-900/80 backdrop-blur-sm border-2 border-slate-600 hover:bg-red-900/20 hover:border-red-400/60 text-slate-100 font-semibold flex items-center gap-2 transition-all duration-300 hover:scale-105 hover:shadow-lg"
-                >
-                  <UserMinus className="w-5 h-5" />
-                  Leave Course
-                </button>
-              ) : (
-                <button
-                  onClick={handleEnroll}
-                  className="px-6 py-3 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-700 hover:to-cyan-700 text-white font-semibold flex items-center gap-2 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105"
-                >
-                  <UserPlus className="w-5 h-5" />
-                  Enroll Now
-                </button>
-              )
-            )}
+            {/* status / action pills */}
+            <div className="flex flex-wrap items-center gap-2 pl-[60px]">
+              {/* creator badge */}
+              {isCreator && (
+                <div className="inline-flex items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-1.5">
+                  <Award className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="text-xs font-semibold text-amber-300">Instructor</span>
+                </div>
+              )}
+
+              {/* enrolled badge */}
+              {isEnrolled && !isCreator && (
+                <div className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5">
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-xs font-semibold text-emerald-300">Enrolled</span>
+                </div>
+              )}
+
+              {/* enroll / leave */}
+              {!isCreator && (
+                isEnrolled ? (
+                  <button
+                    onClick={handleUnenroll}
+                    disabled={enrolling}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-slate-600 hover:border-red-400/50 hover:bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-slate-400 hover:text-red-300 transition-all duration-200 disabled:opacity-50"
+                  >
+                    <UserMinus className="w-3.5 h-3.5" />
+                    {enrolling ? 'Leaving…' : 'Leave Course'}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleEnroll}
+                    disabled={enrolling}
+                    className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 disabled:opacity-50 px-4 py-1.5 text-xs font-semibold text-white shadow-md shadow-sky-900/20 transition-all duration-200"
+                  >
+                    {enrolling
+                      ? <div className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                      : <UserPlus className="w-3.5 h-3.5" />}
+                    {enrolling ? 'Enrolling…' : 'Enroll Now'}
+                  </button>
+                )
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Main Content Area */}
-      <div className="w-full px-4 sm:px-6 py-8" style={{width: '100%', maxWidth: 'none'}}>
-        {canAccessMaterials ? (
-          <div className="animate-fadeInUp">
-            <CourseContentHub
-              courseId={courseId}
-              courseTitle={course.title}
-              isInstructor={isCreator}
-              enrolledEmails={getEnrolledEmails()}
-              isHost={isCreator}
-            />
-          </div>
-        ) : (
-          <div className="bg-slate-900/80 rounded-2xl shadow-2xl shadow-black/40 p-8 text-center border border-sky-300/20">
-            <div className="bg-gradient-to-br from-sky-900/60 to-cyan-900/60 rounded-full p-6 inline-block mb-4">
-              <BookOpen className="w-12 h-12 text-sky-300" />
+        {/* ── Body ── */}
+        <div className="w-full px-4 sm:px-6 py-5 sm:py-6" style={{ width: '100%', maxWidth: 'none' }}>
+          {canAccess ? (
+            <div style={{ animation: 'fadeInUp 0.25s ease-out' }}>
+              <CourseContentHub
+                courseId={courseId}
+                courseTitle={course.title}
+                isInstructor={isCreator}
+                enrolledEmails={getEnrolledEmails()}
+                isHost={isCreator}
+              />
             </div>
-            <h3 className="text-2xl font-bold text-slate-100 mb-2">Enroll to Access Course Materials</h3>
-            <p className="text-slate-300 mb-6">
-              Join this course to access lectures, meetings, and connect with other students!
-            </p>
-            <button
-              onClick={handleEnroll}
-              className="px-8 py-3 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-700 hover:to-cyan-700 text-white font-semibold flex items-center gap-2 mx-auto shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105"
-            >
-              <UserPlus className="w-5 h-5" />
-              Enroll Now
-            </button>
-          </div>
-        )}
+          ) : (
+            <div className="rounded-2xl border border-slate-700/60 bg-slate-900/60 p-8 sm:p-12 text-center max-w-lg mx-auto">
+              <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center mx-auto mb-4">
+                <BookOpen className="w-7 h-7 text-slate-500" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-100 mb-2">Enroll to access this course</h3>
+              <p className="text-slate-400 text-sm mb-6 leading-relaxed">
+                Join to view lectures, attend live meetings, and track your progress.
+              </p>
+              <button
+                onClick={handleEnroll}
+                disabled={enrolling}
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 disabled:opacity-50 px-7 py-3 text-sm font-semibold text-white shadow-lg shadow-sky-900/25 transition-all duration-200"
+              >
+                {enrolling ? <div className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" /> : <UserPlus className="w-4 h-4" />}
+                {enrolling ? 'Enrolling…' : 'Enroll Now'}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
     </>
   );
 };
 
 export default CourseDetailPage;
-
-
-
