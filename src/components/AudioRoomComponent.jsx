@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Peer from 'peerjs';
 import { io } from 'socket.io-client';
 import {
   Mic, MicOff, Users, MessageSquare, Settings, Crown,
@@ -10,6 +9,17 @@ import {
 } from 'lucide-react';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_SERVER_URL || 'http://localhost:3001';
+
+// One RTCPeerConnection per remote participant (mesh topology). Each
+// connection only ever carries the local mic track out and a single
+// remote participant's track in — there is never a connection back to
+// ourselves, so we can never hear our own voice played back.
+const ICE_SERVERS = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ],
+};
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 const TOAST_STYLES = {
@@ -50,6 +60,18 @@ const Avatar = ({ name, size = 'md' }) => {
   );
 };
 
+// ── Remote audio sink ────────────────────────────────────────────────────────
+// Renders one hidden <audio> per connected participant. Only ever fed a
+// *remote* MediaStream (from pc.ontrack of that participant's connection) —
+// the local mic stream is never passed in here, so you never hear yourself.
+const RemoteAudio = ({ stream }) => {
+  const ref = useRef();
+  useEffect(() => {
+    if (ref.current) ref.current.srcObject = stream;
+  }, [stream]);
+  return <audio ref={ref} autoPlay playsInline className="hidden" />;
+};
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 const AudioRoomComponent = ({ roomId, userId, userName, userEmail, isHost }) => {
   const [participants, setParticipants] = useState([]);
@@ -68,10 +90,12 @@ const AudioRoomComponent = ({ roomId, userId, userName, userEmail, isHost }) => 
   const [roomEntryDenied, setRoomEntryDenied] = useState(null); // null | 'locked'
   const [activeTab, setActiveTab] = useState('chat');
   const [roomInfo, setRoomInfo] = useState(null);
+  const [remoteStreams, setRemoteStreams] = useState({}); // userId -> MediaStream (remote only)
 
-  const audioRef = useRef();
   const localStreamRef = useRef();
-  const peerRef = useRef();
+  const peerConnectionsRef = useRef({}); // userId -> RTCPeerConnection
+  const pendingCandidatesRef = useRef({}); // userId -> queued ICE candidates
+  const pendingCallsRef = useRef(new Set()); // userIds to call once mic is ready
   const chatEndRef = useRef();
   const socketRef = useRef();
   const toastTimer = useRef();
@@ -103,6 +127,69 @@ const AudioRoomComponent = ({ roomId, userId, userName, userEmail, isHost }) => 
     });
     socketRef.current = socket;
 
+    // ── WebRTC mesh helpers ──────────────────────────────────────────────────
+    // Build (or reuse) the RTCPeerConnection for a given remote participant.
+    const getOrCreatePeerConnection = (remoteUserId) => {
+      let pc = peerConnectionsRef.current[remoteUserId];
+      if (pc) return pc;
+
+      pc = new RTCPeerConnection(ICE_SERVERS);
+      peerConnectionsRef.current[remoteUserId] = pc;
+
+      // Send only our own mic track out on this connection.
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach(t => pc.addTrack(t, localStreamRef.current));
+      }
+
+      pc.onicecandidate = (e) => {
+        if (e.candidate) {
+          socket.emit('webrtc-ice-candidate', { roomId, targetUserId: remoteUserId, candidate: e.candidate });
+        }
+      };
+
+      // Only ever stash the *remote* party's incoming track — this is what
+      // lets us hear them, and it's the only stream that ever reaches an
+      // <audio> element, so we never hear ourselves.
+      pc.ontrack = (e) => {
+        setRemoteStreams(prev => ({ ...prev, [remoteUserId]: e.streams[0] }));
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (['failed', 'closed', 'disconnected'].includes(pc.connectionState)) {
+          closePeerConnection(remoteUserId);
+        }
+      };
+
+      return pc;
+    };
+
+    const closePeerConnection = (remoteUserId) => {
+      const pc = peerConnectionsRef.current[remoteUserId];
+      if (pc) {
+        pc.close();
+        delete peerConnectionsRef.current[remoteUserId];
+      }
+      delete pendingCandidatesRef.current[remoteUserId];
+      setRemoteStreams(prev => {
+        if (!(remoteUserId in prev)) return prev;
+        const next = { ...prev };
+        delete next[remoteUserId];
+        return next;
+      });
+    };
+
+    const callParticipant = async (remoteUserId) => {
+      if (!localStreamRef.current) { pendingCallsRef.current.add(remoteUserId); return; }
+      try {
+        const pc = getOrCreatePeerConnection(remoteUserId);
+        const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
+        await pc.setLocalDescription(offer);
+        socket.emit('webrtc-offer', { roomId, targetUserId: remoteUserId, offer });
+      } catch {
+        notify('Audio connection issue', 'warning');
+      }
+    };
+
     socket.on('connect', () => {
       setSocketConnected(true);
       socket.emit('join-room', { roomId, userId, userName, userEmail, isHost });
@@ -116,8 +203,16 @@ const AudioRoomComponent = ({ roomId, userId, userName, userEmail, isHost }) => 
       socket.disconnect();
     });
     socket.on('participants-updated', setParticipants);
-    socket.on('participant-joined', (p) => { if (p.userId !== userId) notify(`${p.userName} joined`, 'info'); });
+    socket.on('participant-joined', (p) => {
+      if (p.userId === userId) return;
+      notify(`${p.userName} joined`, 'info');
+      // We were already in the room, so we initiate the connection to the
+      // newcomer. Combined with every other existing participant doing the
+      // same, this forms a full mesh without duplicate offers.
+      callParticipant(p.userId);
+    });
     socket.on('participant-left', ({ userId: lid }) => {
+      closePeerConnection(lid);
       setParticipants(prev => {
         const who = prev.find(p => p.userId === lid);
         if (who && who.userId !== userId) notify(`${who.userName} left`, 'info');
@@ -140,18 +235,50 @@ const AudioRoomComponent = ({ roomId, userId, userName, userEmail, isHost }) => 
     socket.on('host-action', ({ message: m }) => notify(m, 'warning'));
     socket.on('message-error', (m) => notify(m, 'error'));
 
-    // PeerJS — unique ID per session to avoid reuse errors
-    const peerId = `${userId}-${Date.now()}`;
-    const peer = new Peer(peerId);
-    peerRef.current = peer;
-    peer.on('error', (e) => { if (e.type !== 'peer-unavailable') notify('Audio connection issue', 'warning'); });
-    peer.on('call', (call) => {
-      call.answer(localStreamRef.current || undefined);
-      call.on('stream', (s) => { if (audioRef.current) audioRef.current.srcObject = s; });
+    // ── Incoming WebRTC signaling ────────────────────────────────────────────
+    socket.on('webrtc-offer', async ({ fromUserId, offer }) => {
+      try {
+        const pc = getOrCreatePeerConnection(fromUserId);
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const queued = pendingCandidatesRef.current[fromUserId] || [];
+        queued.forEach(c => pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {}));
+        pendingCandidatesRef.current[fromUserId] = [];
+
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit('webrtc-answer', { roomId, targetUserId: fromUserId, answer });
+      } catch {
+        notify('Audio connection issue', 'warning');
+      }
     });
 
-    navigator.mediaDevices.getUserMedia({ audio: true })
-      .then(s => { localStreamRef.current = s; })
+    socket.on('webrtc-answer', async ({ fromUserId, answer }) => {
+      const pc = peerConnectionsRef.current[fromUserId];
+      if (pc) {
+        try { await pc.setRemoteDescription(new RTCSessionDescription(answer)); } catch { /* ignore */ }
+      }
+    });
+
+    socket.on('webrtc-ice-candidate', ({ fromUserId, candidate }) => {
+      const pc = peerConnectionsRef.current[fromUserId];
+      if (pc && pc.remoteDescription) {
+        pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+      } else {
+        pendingCandidatesRef.current[fromUserId] = pendingCandidatesRef.current[fromUserId] || [];
+        pendingCandidatesRef.current[fromUserId].push(candidate);
+      }
+    });
+
+    navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    })
+      .then(s => {
+        localStreamRef.current = s;
+        // Now that the mic is ready, call anyone we were waiting to connect to.
+        const queued = Array.from(pendingCallsRef.current);
+        pendingCallsRef.current.clear();
+        queued.forEach(callParticipant);
+      })
       .catch(() => notify('Microphone unavailable — voice disabled', 'warning'));
 
     socket.emit('join-room', { roomId, userId, userName, userEmail, isHost });
@@ -161,7 +288,9 @@ const AudioRoomComponent = ({ roomId, userId, userName, userEmail, isHost }) => 
       socket.emit('leave-room', { roomId, userId });
       socket.disconnect();
       localStreamRef.current?.getTracks().forEach(t => t.stop());
-      if (peerRef.current && !peerRef.current.destroyed) peerRef.current.destroy();
+      Object.keys(peerConnectionsRef.current).forEach(closePeerConnection);
+      pendingCallsRef.current.clear();
+      setRemoteStreams({});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, userId]);
@@ -170,8 +299,9 @@ const AudioRoomComponent = ({ roomId, userId, userName, userEmail, isHost }) => 
     const s = sock || socketRef.current;
     s?.emit('leave-room', { roomId, userId });
     localStreamRef.current?.getTracks().forEach(t => t.stop());
-    if (audioRef.current) audioRef.current.srcObject = null;
-    if (peerRef.current && !peerRef.current.destroyed) peerRef.current.destroy();
+    Object.values(peerConnectionsRef.current).forEach(pc => pc.close());
+    peerConnectionsRef.current = {};
+    setRemoteStreams({});
     navigate('/audio-rooms', { replace: true });
   }, [navigate, roomId, userId]);
 
@@ -609,7 +739,9 @@ const AudioRoomComponent = ({ roomId, userId, userName, userEmail, isHost }) => 
         </div>
       </div>
 
-      <audio ref={audioRef} autoPlay className="hidden" />
+      {Object.entries(remoteStreams).map(([uid, stream]) => (
+        <RemoteAudio key={uid} stream={stream} />
+      ))}
     </div>
   );
 };

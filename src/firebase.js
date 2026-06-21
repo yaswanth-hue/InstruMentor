@@ -442,6 +442,28 @@ export const getMeetingById = async (meetingId) => {
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 };
 
+// Mark a meeting as live. Called when the host actually starts it —
+// this is what keeps "scheduled" meetings from silently flipping to
+// "Completed" just because their scheduled time has passed.
+export const startMeeting = async (meetingId) => {
+  const meetingRef = doc(db, "meetings", meetingId);
+  await updateDoc(meetingRef, {
+    isActive: true,
+    startedAt: serverTimestamp(),
+  });
+};
+
+// Mark a meeting as ended (host clicked "End meeting for everyone",
+// or everyone left). This is the only thing that should produce the
+// "Ended" status — never just the clock passing scheduledTime.
+export const endMeeting = async (meetingId) => {
+  const meetingRef = doc(db, "meetings", meetingId);
+  await updateDoc(meetingRef, {
+    isActive: false,
+    endedAt: serverTimestamp(),
+  });
+};
+
 // Course materials/lectures helpers - Support large video files
 export const uploadCourseMaterial = (courseId, file, title, uploaderId, onProgress) => {
   return new Promise((resolve, reject) => {

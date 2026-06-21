@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { auth, createMeeting, getMeetings } from '../firebase';
+import { auth, createMeeting, getMeetings, startMeeting } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   Calendar, Clock, Video, Plus, Trash2, Play, Radio,
@@ -20,24 +20,33 @@ const fmtDate = raw => {
   });
 };
 
-const getStatus = meeting => {
-  const now = new Date();
+/* If a meeting's scheduled time passes by more than this and the host
+   never started it, treat it as Missed instead of leaving it
+   startable forever. */
+const MISSED_GRACE_PERIOD_MS = 30 * 60 * 1000; // 30 minutes
+
+const getStatus = (meeting, now = new Date()) => {
   const t = meeting.scheduledTime?.toDate
     ? meeting.scheduledTime.toDate()
     : new Date(meeting.scheduledTime);
   const diff = t - now;
 
-  // ended trumps everything
+  // ended trumps everything — only an explicit "End meeting" sets this
   if (meeting.endedAt)
     return { key: 'ended',     label: 'Ended',         cls: 'bg-slate-700/60 text-slate-400 border-slate-600/40' };
+  // isActive is only ever set by startMeeting() — never inferred from the clock
   if (meeting.isActive)
     return { key: 'live',      label: '● Live Now',    cls: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30 animate-pulse' };
   if (diff > 0 && diff <= 15 * 60_000)
     return { key: 'soon',      label: 'Starting Soon', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30' };
   if (diff > 0)
     return { key: 'scheduled', label: 'Scheduled',     cls: 'bg-sky-500/15 text-sky-300 border-sky-500/30' };
-  // past & not marked ended
-  return   { key: 'past',      label: 'Completed',     cls: 'bg-slate-700/60 text-slate-400 border-slate-600/40' };
+  // scheduled time has passed but the host never started it — still
+  // startable within the grace window, NOT "Completed". Past the
+  // grace window with no start, it's Missed and no longer startable.
+  if (-diff <= MISSED_GRACE_PERIOD_MS)
+    return { key: 'overdue',   label: 'Ready to Start', cls: 'bg-violet-500/15 text-violet-300 border-violet-500/30' };
+  return   { key: 'missed',    label: 'Missed',         cls: 'bg-slate-700/60 text-slate-400 border-slate-600/40' };
 };
 
 /* ─── Toast ────────────────────────────────────────────────────────────── */
@@ -79,14 +88,14 @@ const Confirm = ({ onOk, onCancel }) => (
 );
 
 /* ─── Meeting card ──────────────────────────────────────────────────────── */
-const MeetingCard = ({ meeting, isHost, userId, onStart, onJoin, onDelete }) => {
+const MeetingCard = ({ meeting, isHost, userId, onStart, onJoin, onDelete, now }) => {
   const [open, setOpen]         = useState(false);
   const [confirm, setConfirm]   = useState(false);
   const [upload, setUpload]     = useState({ file: null, title: '', busy: false });
   const [toast, notify]         = useToast();
-  const status = getStatus(meeting);
+  const status = getStatus(meeting, now);
 
-  const isFinished = status.key === 'ended' || status.key === 'past';
+  const isFinished = status.key === 'ended' || status.key === 'missed';
 
   const doUpload = async () => {
     if (!upload.file) return;
@@ -147,11 +156,12 @@ const MeetingCard = ({ meeting, isHost, userId, onStart, onJoin, onDelete }) => 
               {isHost && !isFinished && (
                 <button onClick={() => onStart(meeting.id)}
                   className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors shadow-lg shadow-emerald-900/20">
-                  <Play className="w-3.5 h-3.5" /> Start
+                  <Play className="w-3.5 h-3.5" />
+                  {status.key === 'live' ? 'Rejoin' : status.key === 'scheduled' ? 'Start Early' : 'Start'}
                 </button>
               )}
-              {/* student: Join — only live or soon */}
-              {!isHost && (status.key === 'live' || status.key === 'soon') && (
+              {/* student: Join — only live, soon, or overdue-waiting */}
+              {!isHost && (status.key === 'live' || status.key === 'soon' || status.key === 'overdue') && (
                 <button onClick={() => onJoin(meeting.id)}
                   className="flex items-center gap-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors shadow-lg shadow-sky-900/20">
                   <Radio className="w-3.5 h-3.5" /> Join
@@ -288,7 +298,15 @@ const CourseMeetingScheduler = ({ courseId, enrolledEmails = [], isHost = false,
   const [formError,    setFormError]    = useState('');
   const [currentUser,  setCurrentUser]  = useState(auth.currentUser);
   const [toast, notify] = useToast();
+  const [now, setNow] = useState(new Date());
   const navigate = useNavigate();
+
+  // Tick every 15s so "Scheduled" → "Starting Soon" → "Ready to Start"
+  // badges update live, instead of only on page reload.
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 15_000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, u => setCurrentUser(u));
@@ -349,6 +367,25 @@ const CourseMeetingScheduler = ({ courseId, enrolledEmails = [], isHost = false,
     } catch (e) {
       console.error(e);
       notify('Failed to delete meeting', 'error');
+    }
+  };
+
+  // Host explicitly starting a meeting — this is the ONLY thing that
+  // should ever flip a meeting to "Live". It writes isActive to
+  // Firestore first so the status badge is correct the instant the
+  // host (or anyone re-loading the page) looks at it, then navigates
+  // into the room. Without this, meetings used to just sit there and
+  // flip to "Completed" once their scheduled time passed, with no way
+  // to actually start them.
+  const handleStart = async id => {
+    try {
+      await startMeeting(id);
+      setMeetings(p => p.map(m => m.id === id ? { ...m, isActive: true, endedAt: null } : m));
+    } catch (e) {
+      console.error('startMeeting:', e);
+      notify('Failed to start meeting', 'error');
+    } finally {
+      navigate(`/meeting/${id}`);
     }
   };
 
@@ -422,8 +459,8 @@ const CourseMeetingScheduler = ({ courseId, enrolledEmails = [], isHost = false,
           ) : (
             <div className="space-y-3">
               {sorted.map(m => (
-                <MeetingCard key={m.id} meeting={m} isHost={isHost} userId={currentUser?.uid}
-                  onStart={id => navigate(`/meeting/${id}`)}
+                <MeetingCard key={m.id} meeting={m} isHost={isHost} userId={currentUser?.uid} now={now}
+                  onStart={handleStart}
                   onJoin={id  => navigate(`/meeting/${id}`)}
                   onDelete={handleDelete}
                 />

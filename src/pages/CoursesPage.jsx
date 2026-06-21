@@ -4,12 +4,12 @@ import { Helmet } from 'react-helmet-async';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   auth, getCourses, getEnrolledCourses,
-  enrollInCourse, unenrollFromCourse,
+  enrollInCourse, unenrollFromCourse, createCourse,
 } from '../firebase';
 import {
   BookOpen, UserPlus, UserMinus, Users, GraduationCap,
   Award, Compass, Search, ArrowRight, ArrowLeft, Library,
-  ChevronRight, Clock,
+  ChevronRight, Clock, Plus, X,
 } from 'lucide-react';
 
 const TAB_KEYS = ['explore', 'my', 'enrolled'];
@@ -157,6 +157,112 @@ const CourseCard = ({ course, index, userId, isEnrolledFn, onEnroll, onUnenroll 
   );
 };
 
+/* ── Create course modal ──────────────────────────────────────────────────── */
+const CreateCourseModal = ({ userId, onClose, onCreated }) => {
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!title.trim()) { setError('Course title is required.'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      await createCourse({
+        title: title.trim(),
+        description: description.trim(),
+        creatorId: userId,
+      });
+      onCreated();
+    } catch (err) {
+      console.error(err);
+      setError('Could not create the course. Please try again.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+      onClick={onClose}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl"
+        style={{ animation: 'fadeInUp 0.25s ease-out' }}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-sky-600/30 to-cyan-600/30 border border-sky-500/20 flex items-center justify-center">
+              <Plus className="w-4.5 h-4.5 text-sky-300" />
+            </div>
+            <h2 className="font-bold text-slate-100">Create course</h2>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors duration-200"
+          >
+            <X className="w-4.5 h-4.5" />
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="px-5 py-5 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+              Title
+            </label>
+            <input
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="e.g. Intro to Jazz Piano"
+              autoFocus
+              className="w-full rounded-xl border border-slate-700 bg-slate-950/60 py-2.5 px-3.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500/60 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+              Description
+            </label>
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="What will students learn in this course?"
+              rows={3}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950/60 py-2.5 px-3.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-sky-500/60 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition resize-none"
+            />
+          </div>
+
+          {error && <p className="text-xs text-red-400">{error}</p>}
+
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-300 hover:border-slate-600 hover:text-slate-100 transition-all duration-200"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-sky-900/20 transition-all duration-200 disabled:opacity-50"
+            >
+              {saving
+                ? <div className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                : <Plus className="w-3.5 h-3.5" />}
+              Create course
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
 /* ── Page ──────────────────────────────────────────────────────────────────── */
 const CoursesPage = () => {
   const navigate = useNavigate();
@@ -167,6 +273,7 @@ const CoursesPage = () => {
   const [enrolled,  setEnrolled]  = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [search,    setSearch]    = useState('');
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, u => setUserId(u?.uid || null));
@@ -202,6 +309,14 @@ const CoursesPage = () => {
 
   const isEnrolledFn = id => enrolled.some(c => c.id === id);
 
+  const handleCourseCreated = async () => {
+    setShowCreateModal(false);
+    try {
+      const [all, mine] = await Promise.all([getCourses(), getCourses(userId)]);
+      setCourses(all); setMyCourses(mine);
+    } catch (e) { console.error(e); }
+  };
+
   const list = useMemo(() => {
     if (tab === 'explore') return courses.filter(c => c.creatorId !== userId);
     if (tab === 'my')      return myCourses;
@@ -223,8 +338,9 @@ const CoursesPage = () => {
 
   const empty = useMemo(() => {
     if (search.trim()) return { title: 'No matches', hint: 'Try a different keyword.', action: () => setSearch(''), actionLabel: 'Clear search' };
-    if (tab === 'enrolled') return { title: 'Not enrolled anywhere', hint: 'Browse the catalog and join a course.', action: () => goTab('explore'), actionLabel: 'Browse courses' };
-    return { title: 'Nothing here yet', hint: 'No courses available right now.', action: () => goTab('explore'), actionLabel: 'Browse all courses' };
+    if (tab === 'enrolled') return { title: 'Not enrolled anywhere', hint: 'Join a course to see it here.' };
+    if (tab === 'my') return { title: 'No courses yet', hint: 'Create your first course to start teaching.', action: () => setShowCreateModal(true), actionLabel: 'Create course' };
+    return { title: 'Nothing here yet', hint: 'No courses available right now.' };
   }, [tab, search]);
 
   return (
@@ -251,20 +367,32 @@ const CoursesPage = () => {
               Back
             </button>
 
-            {/* Title row — no create button */}
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-sky-600/30 to-cyan-600/30 border border-sky-500/20 flex items-center justify-center shrink-0">
-                <TabIcon className="w-6 h-6 text-sky-300" />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Courses</span>
-                  <span className="text-xs text-slate-600">·</span>
-                  <span className="text-xs text-slate-500">{loading ? '…' : `${list.length}`}</span>
+            {/* Title row */}
+            <div className="flex items-center justify-between gap-3 mb-6">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-sky-600/30 to-cyan-600/30 border border-sky-500/20 flex items-center justify-center shrink-0">
+                  <TabIcon className="w-6 h-6 text-sky-300" />
                 </div>
-                <h1 className="text-xl sm:text-2xl font-bold text-slate-50">{cfg.headline}</h1>
-                <p className="text-slate-400 text-sm mt-0.5 hidden sm:block">{cfg.sub}</p>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Courses</span>
+                    <span className="text-xs text-slate-600">·</span>
+                    <span className="text-xs text-slate-500">{loading ? '…' : `${list.length}`}</span>
+                  </div>
+                  <h1 className="text-xl sm:text-2xl font-bold text-slate-50">{cfg.headline}</h1>
+                  <p className="text-slate-400 text-sm mt-0.5 hidden sm:block">{cfg.sub}</p>
+                </div>
               </div>
+
+              {tab === 'my' && (
+                <button
+                  onClick={() => setShowCreateModal(true)}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 px-3.5 py-2 text-xs sm:text-sm font-semibold text-white shadow-md shadow-sky-900/20 transition-all duration-200 shrink-0"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span className="hidden sm:inline">Create course</span>
+                </button>
+              )}
             </div>
 
             {/* Tabs */}
@@ -317,12 +445,14 @@ const CoursesPage = () => {
               </div>
               <p className="font-bold text-slate-200 text-lg mb-1">{empty.title}</p>
               <p className="text-slate-400 text-sm mb-6 max-w-xs">{empty.hint}</p>
-              <button
-                onClick={empty.action}
-                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-sky-900/20 transition-all duration-200"
-              >
-                {empty.actionLabel} <ArrowRight className="w-4 h-4" />
-              </button>
+              {empty.action && (
+                <button
+                  onClick={empty.action}
+                  className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-cyan-600 hover:from-sky-500 hover:to-cyan-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg shadow-sky-900/20 transition-all duration-200"
+                >
+                  {empty.actionLabel} <ArrowRight className="w-4 h-4" />
+                </button>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -341,6 +471,14 @@ const CoursesPage = () => {
           )}
         </div>
       </div>
+
+      {showCreateModal && (
+        <CreateCourseModal
+          userId={userId}
+          onClose={() => setShowCreateModal(false)}
+          onCreated={handleCourseCreated}
+        />
+      )}
     </>
   );
 };

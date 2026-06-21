@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Upload, Video, Play, Trash2, GripVertical, FileVideo,
   Calendar, Clock, Users, Loader, X, Plus, ChevronDown,
@@ -12,6 +13,8 @@ import {
   reorderCourseMaterials,
   getMeetings,
   createMeeting,
+  startMeeting,
+  endMeeting,
   auth
 } from '../firebase';
 
@@ -39,12 +42,21 @@ const formatRelative = (timestamp) => {
   const now = new Date();
   const diff = date - now;
   const days = Math.ceil(diff / 86400000);
-  if (diff < 0) return 'Completed';
+  // Don't claim "Completed" just because the scheduled time passed —
+  // only an explicit end/active state should decide that. The caller
+  // is responsible for checking isActive/endedAt before falling back
+  // to this label.
+  if (diff < 0) return 'Ready to Start';
   if (days === 0) return 'Today';
   if (days === 1) return 'Tomorrow';
   if (days < 7) return `In ${days} days`;
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
+
+/* If a meeting's scheduled time passes by more than this and the host
+   never started it, treat it as Missed instead of leaving it
+   startable forever. */
+const MISSED_GRACE_PERIOD_MS = 30 * 60 * 1000; // 30 minutes
 
 /* ─── Empty state ──────────────────────────────────────────────────────────── */
 const EmptyState = ({ icon: Icon, title, subtitle }) => (
@@ -137,7 +149,14 @@ const DateTimePicker = ({ value, onChange }) => {
     if (!date) return;
     const d = new Date(date);
     d.setHours(to24(h, ap), parseInt(m, 10), 0, 0);
-    onChange(d.toISOString().slice(0, 16));
+    // IMPORTANT: do NOT use d.toISOString() here — it converts to UTC,
+    // which silently shifts the picked time by the local UTC offset
+    // (e.g. picking 2:45 PM IST would get stored as 09:15). Build a
+    // local-time string by hand instead so the picked wall-clock time
+    // round-trips through new Date(value) unchanged.
+    const pad = n => String(n).padStart(2, '0');
+    const local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    onChange(local);
   };
 
   const pickDate = (day) => {
@@ -339,6 +358,7 @@ const DateTimePicker = ({ value, onChange }) => {
 
 /* ─── Component ────────────────────────────────────────────────────────────── */
 const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails, isHost }) => {
+  const navigate = useNavigate();
   const [activeTab,        setActiveTab]        = useState('lectures');
   const [lectures,         setLectures]         = useState([]);
   const [meetings,         setMeetings]         = useState([]);
@@ -354,8 +374,18 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
   const [playingVideo,     setPlayingVideo]     = useState(null);
   const [expandedMeeting,  setExpandedMeeting]  = useState(null);
   const [newMeeting, setNewMeeting] = useState({ title: '', description: '', scheduledTime: '' });
+  const [meetingFormError, setMeetingFormError] = useState('');
+  const [now, setNow] = useState(new Date());
+  const [startingMeetingId, setStartingMeetingId] = useState(null);
 
   useEffect(() => { loadContent(); }, [courseId]);
+
+  // Tick every 15s so meeting badges ("Today" → "Ready to Start", etc.)
+  // update live without needing a manual page reload.
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 15_000);
+    return () => clearInterval(id);
+  }, []);
 
   const loadContent = async () => {
     try {
@@ -420,19 +450,60 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
 
   const handleCreateMeeting = async () => {
     if (!newMeeting.title.trim() || !newMeeting.scheduledTime) return;
+    setMeetingFormError('');
+
+    const dt = new Date(newMeeting.scheduledTime);
+    if (isNaN(dt.getTime())) { setMeetingFormError('Invalid date or time.'); return; }
+    // Guard against scheduling in the past — the calendar UI already
+    // disables past days/times, but this is a hard backstop in case
+    // stale state ever slips through (e.g. modal left open past
+    // midnight, or a past time left over from before today's date
+    // was picked).
+    if (dt <= new Date()) { setMeetingFormError('Please choose a future date and time.'); return; }
+
     try {
       const currentUserId = auth.currentUser?.uid;
       await createMeeting({
         courseId, title: newMeeting.title, description: newMeeting.description,
-        scheduledTime: new Date(newMeeting.scheduledTime),
+        scheduledTime: dt,
         participants: [currentUserId, ...(enrolledEmails || [])],
-        status: 'scheduled'
+        isActive: false,
       });
       setShowMeetingModal(false);
       setNewMeeting({ title: '', description: '', scheduledTime: '' });
+      setMeetingFormError('');
       await loadContent();
     } catch (e) {
       console.error('Error creating meeting:', e);
+      setMeetingFormError('Failed to schedule the meeting. Please try again.');
+    }
+  };
+
+  // Host explicitly starting a meeting. This is the only thing that
+  // should ever mark a meeting "live" — never just the clock passing
+  // its scheduled time. Marks it active in Firestore first so the
+  // status is correct, then opens the meeting room.
+  const handleStartMeeting = async (meetingId) => {
+    setStartingMeetingId(meetingId);
+    try {
+      await startMeeting(meetingId);
+      setMeetings(p => p.map(m => m.id === meetingId ? { ...m, isActive: true, endedAt: null } : m));
+    } catch (e) {
+      console.error('Error starting meeting:', e);
+    } finally {
+      setStartingMeetingId(null);
+      navigate(`/meeting/${meetingId}`);
+    }
+  };
+
+  // Host ending a meeting for everyone — this is the only thing that
+  // should ever mark a meeting "Ended".
+  const handleEndMeeting = async (meetingId) => {
+    try {
+      await endMeeting(meetingId);
+      setMeetings(p => p.map(m => m.id === meetingId ? { ...m, isActive: false, endedAt: new Date() } : m));
+    } catch (e) {
+      console.error('Error ending meeting:', e);
     }
   };
 
@@ -523,7 +594,7 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
         )}
         {isInstructor && activeTab === 'meetings' && (
           <button
-            onClick={() => setShowMeetingModal(true)}
+            onClick={() => { setShowMeetingModal(true); setMeetingFormError(''); }}
             className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-500 hover:to-blue-500 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-violet-900/20 transition-all duration-200"
           >
             <Plus className="w-4 h-4" />
@@ -640,15 +711,25 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                 const meetingDate = meeting.scheduledTime?.toDate
                   ? meeting.scheduledTime.toDate()
                   : new Date(meeting.scheduledTime);
-                const isPast      = meetingDate < new Date();
+                const isEnded     = !!meeting.endedAt;
+                const isLive      = !!meeting.isActive && !isEnded;
+                // "Overdue" = scheduled time has passed but the host
+                // never started it, and we're still within the grace
+                // window — still startable. Past the grace window
+                // with no start, it's "Missed" — not startable.
+                const msSincePast = now - meetingDate;
+                const isOverdue   = !isLive && !isEnded && msSincePast > 0 && msSincePast <= MISSED_GRACE_PERIOD_MS;
+                const isMissed    = !isLive && !isEnded && msSincePast > MISSED_GRACE_PERIOD_MS;
+                const isFinished  = isEnded || isMissed;
                 const isExpanded  = expandedMeeting === meeting.id;
-                const relative    = formatRelative(meeting.scheduledTime);
+                const relative    = isLive ? '● Live Now' : isOverdue ? 'Ready to Start' : isMissed ? 'Missed' : formatRelative(meeting.scheduledTime);
+                const isStarting  = startingMeetingId === meeting.id;
 
                 return (
                   <div
                     key={meeting.id}
                     className={`rounded-xl border transition-all duration-200 overflow-hidden ${
-                      isPast
+                      isFinished
                         ? 'border-slate-700/40 bg-slate-950/30'
                         : 'border-slate-700/60 bg-slate-950/40 hover:border-slate-600/60 hover:bg-slate-900/60'
                     }`}
@@ -659,21 +740,31 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                     >
                       {/* status dot */}
                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                        isPast
+                        isFinished
                           ? 'bg-slate-800 border border-slate-700'
+                          : isLive
+                          ? 'bg-emerald-500/20 border border-emerald-500/30'
                           : 'bg-gradient-to-br from-violet-600/30 to-blue-600/30 border border-violet-500/20'
                       }`}>
-                        <Calendar className={`w-4 h-4 ${isPast ? 'text-slate-500' : 'text-violet-300'}`} />
+                        <Calendar className={`w-4 h-4 ${isFinished ? 'text-slate-500' : isLive ? 'text-emerald-300' : 'text-violet-300'}`} />
                       </div>
 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <h3 className={`text-sm font-semibold truncate ${isPast ? 'text-slate-400' : 'text-slate-100'}`}>
+                          <h3 className={`text-sm font-semibold truncate ${isFinished ? 'text-slate-400' : 'text-slate-100'}`}>
                             {meeting.title}
                           </h3>
-                          {isPast ? (
+                          {isEnded ? (
                             <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-500 font-medium">
-                              Done
+                              Ended
+                            </span>
+                          ) : isMissed ? (
+                            <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-500 font-medium">
+                              Missed
+                            </span>
+                          ) : isLive ? (
+                            <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-medium animate-pulse">
+                              {relative}
                             </span>
                           ) : (
                             <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-300 font-medium">
@@ -709,18 +800,39 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                         {meeting.description && (
                           <p className="text-sm text-slate-400 leading-relaxed">{meeting.description}</p>
                         )}
-                        {!isPast && (
-                          <button
-                            onClick={() => window.open(`/meeting/${meeting.id}`, '_blank')}
-                            className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 ${
-                              isInstructor
-                                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-900/20'
-                                : 'bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-500 hover:to-blue-500 shadow-violet-900/20'
-                            }`}
-                          >
-                            <Phone className="w-4 h-4" />
-                            {isInstructor ? 'Start Meeting' : 'Join Meeting'}
-                          </button>
+                        {isMissed && (
+                          <p className="text-xs text-slate-500 flex items-center gap-1.5">
+                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                            This meeting was never started and has expired.
+                          </p>
+                        )}
+                        {!isFinished && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => isInstructor ? handleStartMeeting(meeting.id) : navigate(`/meeting/${meeting.id}`)}
+                              disabled={isStarting}
+                              className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all duration-200 disabled:opacity-60 ${
+                                isInstructor
+                                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-900/20'
+                                  : 'bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-500 hover:to-blue-500 shadow-violet-900/20'
+                              }`}
+                            >
+                              <Phone className="w-4 h-4" />
+                              {isStarting
+                                ? 'Starting…'
+                                : isInstructor
+                                ? (isLive ? 'Rejoin Meeting' : 'Start Meeting')
+                                : 'Join Meeting'}
+                            </button>
+                            {isInstructor && isLive && (
+                              <button
+                                onClick={() => handleEndMeeting(meeting.id)}
+                                className="flex items-center gap-2 rounded-xl border border-red-500/30 hover:border-red-500/50 hover:bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-400 transition-all duration-200"
+                              >
+                                End Meeting
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     )}
@@ -901,7 +1013,7 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                 <h2 className="font-bold text-slate-100">Schedule Meeting</h2>
               </div>
               <button
-                onClick={() => setShowMeetingModal(false)}
+                onClick={() => { setShowMeetingModal(false); setMeetingFormError(''); }}
                 className="p-1.5 rounded-xl hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-colors"
               >
                 <X className="w-4 h-4" />
@@ -948,11 +1060,17 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                 <Users className="w-4 h-4 text-slate-500 shrink-0" />
                 <p className="text-xs text-slate-400">All enrolled students will be invited automatically.</p>
               </div>
+
+              {meetingFormError && (
+                <div className="flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-xs text-red-300">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {meetingFormError}
+                </div>
+              )}
             </div>
 
             <div className="flex gap-3 px-6 py-4 border-t border-slate-700/60">
               <button
-                onClick={() => setShowMeetingModal(false)}
+                onClick={() => { setShowMeetingModal(false); setMeetingFormError(''); }}
                 className="flex-1 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 py-2.5 text-sm font-semibold text-slate-300 transition-colors"
               >
                 Cancel

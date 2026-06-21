@@ -29,7 +29,7 @@ import {
   Laugh,
   ChevronUp
 } from 'lucide-react';
-import { auth, getMeetingById, getCourseById } from '../firebase';
+import { auth, getMeetingById, getCourseById, startMeeting, endMeeting } from '../firebase';
 
 const socket = io.connect('http://localhost:3001', {
   reconnection: true,
@@ -52,6 +52,13 @@ const VideoMeetingRoom = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [isHost, setIsHost] = useState(false);
+
+  // Pre-join gate. Media/socket join no longer fires the instant the
+  // page loads — the host must explicitly click "Start Meeting" (or a
+  // student must click "Join") first. This is what keeps scheduled
+  // meetings from silently starting (and finishing) on their own.
+  const [hasJoined, setHasJoined] = useState(false);
+  const [starting, setStarting] = useState(false);
 
   // Participants
   const [participants, setParticipants] = useState([]);
@@ -186,9 +193,25 @@ const VideoMeetingRoom = () => {
     };
   }, []);
 
+  // While waiting on the pre-join screen (not yet joined, meeting not
+  // active/ended), poll every 10s so the "Join Meeting" button appears
+  // automatically once the host starts — no manual refresh needed.
+  useEffect(() => {
+    if (hasJoined || !meeting || meeting.isActive || meeting.endedAt) return;
+    const id = setInterval(async () => {
+      try {
+        const fresh = await getMeetingById(meetingId);
+        if (fresh) setMeeting(fresh);
+      } catch (e) {
+        console.error('Error polling meeting status:', e);
+      }
+    }, 10_000);
+    return () => clearInterval(id);
+  }, [hasJoined, meeting, meetingId]);
+
   // Initialize media and socket connection
   useEffect(() => {
-    if (!meeting || loading || error) return;
+    if (!meeting || loading || error || !hasJoined) return;
 
     const userId = auth.currentUser?.uid;
     const userName = auth.currentUser?.displayName || auth.currentUser?.email;
@@ -394,7 +417,7 @@ const VideoMeetingRoom = () => {
       socket.off('new-message');
       socket.off('chat-history');
     };
-  }, [meeting, loading, error, isHost, meetingId]);
+  }, [meeting, loading, error, isHost, meetingId, hasJoined]);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -775,6 +798,11 @@ const VideoMeetingRoom = () => {
         // Notify server to end meeting
         socket.emit('end-room', { roomId: meetingId });
 
+        // Mark the meeting as ended in Firestore so it correctly shows
+        // "Ended" (not "Completed" from the clock, not still "Live")
+        // back on the course page.
+        try { await endMeeting(meetingId); } catch (e) { console.error('endMeeting:', e); }
+
         // Navigate to course detail with replace to prevent back navigation to meeting
         navigate(`/course/${meeting?.courseId}`, { replace: true });
       } catch (err) {
@@ -782,6 +810,31 @@ const VideoMeetingRoom = () => {
         alert('Failed to end meeting');
       }
     }
+  };
+
+  // Host clicks "Start Meeting" on the pre-join screen. Marks the
+  // meeting active in Firestore first (so status is correct even if
+  // the host's connection drops before they finish joining), then
+  // opens the gate that lets the media/socket effect run.
+  const handleStartMeeting = async () => {
+    setStarting(true);
+    try {
+      await startMeeting(meetingId);
+      setMeeting(m => m ? { ...m, isActive: true, endedAt: null } : m);
+    } catch (err) {
+      console.error('Error starting meeting:', err);
+      // Don't block the host from entering just because the status
+      // write failed — they can still run the call, it just won't be
+      // reflected as "Live" elsewhere until it succeeds on retry.
+    } finally {
+      setStarting(false);
+      setHasJoined(true);
+    }
+  };
+
+  // Student/participant clicks "Join Meeting" once it's live.
+  const handleJoinMeeting = () => {
+    setHasJoined(true);
   };
 
   const handleLeave = () => {
@@ -953,6 +1006,102 @@ const VideoMeetingRoom = () => {
           >
             Back to Courses
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Pre-join screen — shown until the host explicitly starts the
+  // meeting (or a participant explicitly joins one that's already
+  // live). This is what stops a future-scheduled meeting from
+  // silently "starting" the moment someone opens the link, and stops
+  // it from being marked finished just because its scheduled time
+  // has passed — only an explicit Start/End action changes that now.
+  if (!hasJoined) {
+    const scheduled = meeting?.scheduledTime?.toDate
+      ? meeting.scheduledTime.toDate()
+      : new Date(meeting?.scheduledTime);
+    const isFutureMeeting = !isNaN(scheduled) && scheduled > new Date() && !meeting?.isActive;
+    const isEnded = !!meeting?.endedAt;
+
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center px-4" style={{ width: '100%', maxWidth: 'none' }}>
+        <div className="bg-gray-800 border border-gray-700 rounded-2xl p-8 w-full max-w-md text-center">
+          <div className="w-14 h-14 rounded-2xl bg-purple-600/20 border border-purple-500/30 flex items-center justify-center mx-auto mb-4">
+            <Video className="w-7 h-7 text-purple-400" />
+          </div>
+
+          <h2 className="text-xl font-bold text-white mb-1">{meeting?.title || 'Meeting'}</h2>
+          {!isNaN(scheduled) && (
+            <p className="text-sm text-gray-400 mb-5">
+              Scheduled for {scheduled.toLocaleString([], {
+                weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+              })}
+            </p>
+          )}
+
+          {isEnded ? (
+            <>
+              <p className="text-gray-300 mb-6">This meeting has already ended.</p>
+              <button
+                onClick={() => navigate(`/course/${meeting?.courseId}`)}
+                className="w-full px-6 py-3 bg-gray-700 text-white rounded-xl hover:bg-gray-600 font-semibold transition-colors"
+              >
+                Back to Course
+              </button>
+            </>
+          ) : isHost ? (
+            <>
+              <p className="text-gray-300 mb-6">
+                {isFutureMeeting
+                  ? "This meeting is scheduled for later, but you can start it early whenever you're ready."
+                  : "You're hosting this meeting. Start it whenever you're ready."}
+              </p>
+              <button
+                onClick={handleStartMeeting}
+                disabled={starting}
+                className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white rounded-xl font-semibold transition-colors"
+              >
+                {starting ? (
+                  <>
+                    <span className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                    Starting…
+                  </>
+                ) : (
+                  'Start Meeting'
+                )}
+              </button>
+            </>
+          ) : meeting?.isActive ? (
+            <>
+              <p className="text-gray-300 mb-6">The host has started this meeting. You can join now.</p>
+              <button
+                onClick={handleJoinMeeting}
+                className="w-full px-6 py-3 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-semibold transition-colors"
+              >
+                Join Meeting
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-gray-300 mb-6">
+                {isFutureMeeting
+                  ? "The host hasn't started this meeting yet. You'll be able to join as soon as they do."
+                  : "Waiting for the host to start this meeting…"}
+              </p>
+              <button
+                onClick={async () => {
+                  try {
+                    const fresh = await getMeetingById(meetingId);
+                    if (fresh) setMeeting(fresh);
+                  } catch (e) { console.error('Error checking meeting status:', e); }
+                }}
+                className="w-full px-6 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-xl font-semibold transition-colors"
+              >
+                Check Again
+              </button>
+            </>
+          )}
         </div>
       </div>
     );

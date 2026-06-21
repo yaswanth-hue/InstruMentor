@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import {
   auth,
@@ -51,8 +51,14 @@ import saxophoneImg from "../assets/photos/saxophone.png";
 import keyboardImg from "../assets/photos/keyboard.png";
 import violinImg from "../assets/photos/violin.png";
 
+// Firestore documents are capped at 1MB. Base64 inflates file size by ~33%,
+// and the post document also carries some text fields, so we cap raw video
+// uploads well under that ceiling to make sure they reliably fit.
+const MAX_VIBE_VIDEO_BYTES = 650 * 1024; // 650KB
+
 const SocialHomePage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [feed, setFeed] = useState([]);
   const [userProfile, setUserProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -125,6 +131,17 @@ const SocialHomePage = () => {
     };
   }, []);
 
+  // Open the Create Post modal if we were navigated here with that intent
+  // (e.g. the "Create Post" button on the profile page)
+  useEffect(() => {
+    if (location.state?.openCreatePost) {
+      setShowCreatePost(true);
+      // Clear the flag so it doesn't reopen on back/forward navigation
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state]);
+
   const loadData = async (signal) => {
     const userId = auth.currentUser?.uid;
     if (!userId) {
@@ -177,7 +194,8 @@ const SocialHomePage = () => {
           posts = [];
         }
       } else if (activeTab === 'explore') {
-        posts = await getPosts(); // Always show all posts
+        const allPosts = await getPosts(); // Fetch all posts...
+        posts = allPosts.filter(post => post.userId !== userId); // ...but exclude your own
       }
 
       // Check if aborted
@@ -250,18 +268,18 @@ const SocialHomePage = () => {
     const isVideo = postImage.type.startsWith('video/');
     const isImage = postImage.type.startsWith('image/');
 
-    if (isImage && (postMediaType === 'reel' || postMediaType === 'video')) {
-      alert('Images cannot be uploaded as Vibes or Streams. Please select "Post" type.');
+    if (isImage && postMediaType === 'reel') {
+      alert('Images cannot be uploaded as Vibes. Please select "Post" type.');
       return;
     }
 
     if (isVideo && postMediaType === 'post') {
-      alert('Videos cannot be uploaded as regular Posts. Please select "Vibe" or "Stream" type.');
+      alert('Videos cannot be uploaded as regular Posts. Please select "Vibe" type.');
       return;
     }
 
     if (postMediaType === 'reel' && videoDuration > 120) {
-      alert('Vibes (Reels) must be 2 minutes or less. Please select "Streams" for longer videos.');
+      alert('Vibes must be 2 minutes or less. Please trim your video and try again.');
       return;
     }
 
@@ -616,18 +634,6 @@ const SocialHomePage = () => {
                     </button>
                   </div>
                 </div>
-
-                <div className="rounded-3xl border border-slate-700 bg-zinc-900/70 backdrop-blur-2xl shadow-xl shadow-black/40 p-5">
-                  <p className="text-sm font-semibold text-zinc-100">Create something</p>
-                  <p className="mt-1 text-xs text-zinc-400">Share a quick practice update.</p>
-                  <button
-                    type="button"
-                    onClick={() => setShowCreatePost(true)}
-                    className="mt-4 w-full rounded-2xl bg-sky-600 hover:bg-sky-500 text-white px-4 py-3 text-sm font-semibold transition-colors"
-                  >
-                    Create post
-                  </button>
-                </div>
               </div>
             </aside>
 
@@ -684,12 +690,6 @@ const SocialHomePage = () => {
                       ? 'Follow other musicians to see their posts here!'
                       : 'Be the first to share something amazing!'}
                   </p>
-                  <button
-                    onClick={() => setShowCreatePost(true)}
-                    className="inline-flex items-center justify-center px-6 sm:px-8 py-3 sm:py-3.5 bg-sky-600 hover:bg-sky-500 text-white rounded-2xl text-sm font-semibold shadow-lg shadow-sky-900/30 transition-colors"
-                  >
-                    Create Your First Post
-                  </button>
                 </div>
               ) : activeTab === 'explore' ? (
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-1.5 sm:gap-2">
@@ -759,15 +759,25 @@ const SocialHomePage = () => {
                     <p className="text-zinc-100 text-base leading-relaxed whitespace-pre-wrap">{post.content}</p>
                   </div>
 
-                  {/* Post Image */}
+                  {/* Post Media */}
                   {post.imageUrl && (
                     <div className="relative w-full aspect-video bg-zinc-900">
-                      <img
-                        src={post.imageUrl}
-                        alt="Post content"
-                        className="w-full h-full object-contain"
-                        loading="lazy"
-                      />
+                      {post.mediaType === 'reel' || post.mediaType === 'video' ? (
+                        <video
+                          src={post.imageUrl}
+                          controls
+                          playsInline
+                          loop
+                          className="w-full h-full object-contain"
+                        />
+                      ) : (
+                        <img
+                          src={post.imageUrl}
+                          alt="Post content"
+                          className="w-full h-full object-contain"
+                          loading="lazy"
+                        />
+                      )}
                     </div>
                   )}
 
@@ -919,13 +929,21 @@ const SocialHomePage = () => {
 
                   {postImage && (
                     <div className="mt-6 relative">
-                      <img
-                        src={URL.createObjectURL(postImage)}
-                        alt="Preview"
-                        className="w-full rounded-2xl object-cover max-h-96 shadow-lg"
-                      />
+                      {postImage.type.startsWith('video/') ? (
+                        <video
+                          src={URL.createObjectURL(postImage)}
+                          controls
+                          className="w-full rounded-2xl object-contain max-h-96 shadow-lg bg-black"
+                        />
+                      ) : (
+                        <img
+                          src={URL.createObjectURL(postImage)}
+                          alt="Preview"
+                          className="w-full rounded-2xl object-cover max-h-96 shadow-lg"
+                        />
+                      )}
                       <button
-                        onClick={() => setPostImage(null)}
+                        onClick={() => { setPostImage(null); setPostMediaType('post'); setVideoDuration(0); }}
                         className="absolute top-4 right-4 p-2 bg-black/60 hover:bg-black/80 text-white rounded-full transition-all"
                       >
                         <X className="w-5 h-5" />
@@ -942,22 +960,30 @@ const SocialHomePage = () => {
                         accept="image/*,video/*"
                         onChange={(e) => {
                           const file = e.target.files[0];
-                          setPostImage(file);
-                          // Get video duration if it's a video
                           if (file && file.type.startsWith('video/')) {
+                            if (file.size > MAX_VIBE_VIDEO_BYTES) {
+                              alert(`That video is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Vibes need to be under ${(MAX_VIBE_VIDEO_BYTES / 1024).toFixed(0)}KB — try a shorter clip or a lower-resolution export.`);
+                              e.target.value = '';
+                              return;
+                            }
+                            // Get video duration
                             const video = document.createElement('video');
                             video.preload = 'metadata';
                             video.onloadedmetadata = () => {
-                              setVideoDuration(Math.floor(video.duration));
-                              // Auto-select media type based on duration
-                              if (video.duration <= 120) {
-                                setPostMediaType('reel');
-                              } else {
-                                setPostMediaType('video');
+                              const duration = Math.floor(video.duration);
+                              if (duration > 120) {
+                                // Streams (long-form video) are deprecated — Vibes are capped at 2 minutes
+                                alert('Vibes must be 2 minutes or less. Please choose a shorter video.');
+                                e.target.value = '';
+                                return;
                               }
+                              setPostImage(file);
+                              setVideoDuration(duration);
+                              setPostMediaType('reel');
                             };
                             video.src = URL.createObjectURL(file);
                           } else {
+                            setPostImage(file);
                             setPostMediaType('post');
                             setVideoDuration(0);
                           }
@@ -966,6 +992,9 @@ const SocialHomePage = () => {
                       />
                     </label>
                   </div>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Vibes (videos) must be under {(MAX_VIBE_VIDEO_BYTES / 1024).toFixed(0)}KB and 2 minutes — keep clips short and low-resolution.
+                  </p>
 
                   {/* Media Type Selection */}
                   <div className="mt-6">
@@ -988,17 +1017,7 @@ const SocialHomePage = () => {
                           : 'bg-slate-800 text-slate-300 hover:bg-slate-700 disabled:opacity-50'
                           }`}
                       >
-                        ✨ Vibe (≤2min)
-                      </button>
-                      <button
-                        onClick={() => setPostMediaType('video')}
-                        disabled={!postImage || !postImage.type.startsWith('video/')}
-                        className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${postMediaType === 'video'
-                          ? 'bg-gradient-to-r from-blue-500 to-cyan-500 text-white'
-                          : 'bg-slate-800 text-slate-300 hover:bg-slate-700 disabled:opacity-50'
-                          }`}
-                      >
-                        🎬 Stream (&gt;2min)
+                        ✨ Vibe
                       </button>
                     </div>
                     {videoDuration > 0 && (
