@@ -20,11 +20,6 @@ const fmtDate = raw => {
   });
 };
 
-/* If a meeting's scheduled time passes by more than this and the host
-   never started it, treat it as Missed instead of leaving it
-   startable forever. */
-const MISSED_GRACE_PERIOD_MS = 30 * 60 * 1000; // 30 minutes
-
 const getStatus = (meeting, now = new Date()) => {
   const t = meeting.scheduledTime?.toDate
     ? meeting.scheduledTime.toDate()
@@ -41,12 +36,12 @@ const getStatus = (meeting, now = new Date()) => {
     return { key: 'soon',      label: 'Starting Soon', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30' };
   if (diff > 0)
     return { key: 'scheduled', label: 'Scheduled',     cls: 'bg-sky-500/15 text-sky-300 border-sky-500/30' };
-  // scheduled time has passed but the host never started it — still
-  // startable within the grace window, NOT "Completed". Past the
-  // grace window with no start, it's Missed and no longer startable.
-  if (-diff <= MISSED_GRACE_PERIOD_MS)
-    return { key: 'overdue',   label: 'Ready to Start', cls: 'bg-violet-500/15 text-violet-300 border-violet-500/30' };
-  return   { key: 'missed',    label: 'Missed',         cls: 'bg-slate-700/60 text-slate-400 border-slate-600/40' };
+  // scheduled time has passed — allow up to 10 minutes to start,
+  // after that the window is closed and the meeting is considered missed.
+  const minutesPast = (now - t) / 60_000;
+  if (minutesPast <= 10)
+    return { key: 'overdue',  label: 'Ready to Start', cls: 'bg-violet-500/15 text-violet-300 border-violet-500/30' };
+  return   { key: 'missed',   label: 'Missed',         cls: 'bg-red-500/15 text-red-400 border-red-500/30' };
 };
 
 /* ─── Toast ────────────────────────────────────────────────────────────── */
@@ -161,7 +156,7 @@ const MeetingCard = ({ meeting, isHost, userId, onStart, onJoin, onDelete, now }
                 </button>
               )}
               {/* student: Join — only live, soon, or overdue-waiting */}
-              {!isHost && (status.key === 'live' || status.key === 'soon' || status.key === 'overdue') && (
+              {!isHost && (status.key === 'live' || status.key === 'soon' || status.key === 'overdue') && !isFinished && (
                 <button onClick={() => onJoin(meeting.id)}
                   className="flex items-center gap-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors shadow-lg shadow-sky-900/20">
                   <Radio className="w-3.5 h-3.5" /> Join
@@ -258,7 +253,7 @@ const ScheduleForm = ({ enrolledCount, onSubmit, onClose, isCreating, error }) =
             <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
               <Clock className="w-3 h-3" /> Time *
             </label>
-            <input type="time" value={form.time} onChange={set('time')} min={form.date === minDate ? minTime : undefined} required
+            <input type="time" value={form.time} onChange={set('time')} min={form.date === minDate ? minTime : undefined} step="60" required
               className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-slate-100 focus:border-sky-500/60 focus:outline-none focus:ring-2 focus:ring-sky-500/20 transition [color-scheme:dark]" />
           </div>
         </div>
@@ -378,6 +373,12 @@ const CourseMeetingScheduler = ({ courseId, enrolledEmails = [], isHost = false,
   // flip to "Completed" once their scheduled time passed, with no way
   // to actually start them.
   const handleStart = async id => {
+    // Guard: refuse to start meetings whose window has closed (>10 min past schedule)
+    const mtg = meetings.find(m => m.id === id);
+    if (mtg && getStatus(mtg).key === 'missed') {
+      notify('This meeting can no longer be started — the 10-minute window has passed.', 'error');
+      return;
+    }
     try {
       await startMeeting(id);
       setMeetings(p => p.map(m => m.id === id ? { ...m, isActive: true, endedAt: null } : m));

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { auth } from '../firebase';
 import MeetingRecordingPlayer from './MeetingRecordingPlayer';
+import LoadingSpinner from './LoadingSpinner';
 import {
   BarChart3,
   Calendar,
@@ -77,23 +78,7 @@ const CourseProgressDashboard = ({ courseId, courseTitle }) => {
   };
   
   if (loading) {
-    return (
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="animate-pulse">
-          <div className="h-6 bg-gray-200 rounded w-1/3 mb-6"></div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            {[...Array(3)].map((_, i) => (
-              <div key={i} className="h-24 bg-gray-200 rounded"></div>
-            ))}
-          </div>
-          <div className="space-y-4">
-            {[...Array(3)].map((_, i) => (
-              <div key={i} className="h-20 bg-gray-200 rounded"></div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
+    return <LoadingSpinner fullScreen={false} message="Loading progress…" />;
   }
   
   if (!progress) {

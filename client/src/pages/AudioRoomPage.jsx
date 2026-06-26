@@ -4,6 +4,7 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../firebase';
 import AudioRoomComponent from '../components/AudioRoomComponent';
 import { LogIn, Radio } from 'lucide-react';
+import LoadingSpinner from '../components/LoadingSpinner';
 
 const AudioRoomPage = () => {
   const { roomId } = useParams();
@@ -13,19 +14,7 @@ const AudioRoomPage = () => {
   const isHost = location.state?.isHost === true;
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 flex items-center justify-center" style={{ width: '100%', maxWidth: 'none' }}>
-        <div className="text-center space-y-4">
-          <div className="relative w-16 h-16 mx-auto">
-            <div className="w-16 h-16 rounded-full border-4 border-slate-700 border-t-sky-500 animate-spin" />
-            <div className="absolute inset-0 flex items-center justify-center">
-              <Radio className="w-6 h-6 text-sky-400 animate-pulse" />
-            </div>
-          </div>
-          <p className="text-slate-400 text-sm">Authenticating…</p>
-        </div>
-      </div>
-    );
+    return <LoadingSpinner message="Authenticating…" />;
   }
 
   if (!user) {

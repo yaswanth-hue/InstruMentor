@@ -12,6 +12,7 @@ import {
   UserPlus, UserMinus, Sparkles, Check, Clock
 } from 'lucide-react';
 import CourseContentHub from '../components/CourseContentHub';
+import LoadingSpinner from '../components/LoadingSpinner';
 
 const fmtMonth = raw => {
   const d = raw?.toDate ? raw.toDate() : new Date(raw);
@@ -54,14 +55,7 @@ const CourseDetailPage = () => {
     (course?.enrolledUsers || []).map(uid => `user-${uid}@email.com`);
 
   /* ── Loading ── */
-  if (loading) return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 flex items-center justify-center" style={{ width: '100%', maxWidth: 'none' }}>
-      <div className="flex flex-col items-center gap-3">
-        <div className="w-8 h-8 rounded-full border-2 border-sky-500/30 border-t-sky-500 animate-spin" />
-        <p className="text-slate-400 text-sm">Loading course…</p>
-      </div>
-    </div>
-  );
+  if (loading) return <LoadingSpinner message="Loading course…" />;
 
   /* ── Not found ── */
   if (!course) return (

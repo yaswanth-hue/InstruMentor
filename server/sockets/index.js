@@ -2,7 +2,7 @@ import { Server } from 'socket.io';
 import { registerRoomHandlers } from './roomHandler.js';
 import { registerChatHandlers } from './chatHandler.js';
 import { registerWebRTCHandlers } from './webrtcHandler.js';
-import { socketSecurityMiddleware, corsOptions } from '../../middleware/security.js';
+import { socketSecurityMiddleware, corsOptions } from '../middleware/security.js';
 
 export const initSocket = (httpServer) => {
     const io = new Server(httpServer, {

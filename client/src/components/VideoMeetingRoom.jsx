@@ -30,6 +30,7 @@ import {
   ChevronUp
 } from 'lucide-react';
 import { auth, getMeetingById, getCourseById, startMeeting, endMeeting } from '../firebase';
+import LoadingSpinner from './LoadingSpinner';
 
 const socket = io.connect('http://localhost:3001', {
   reconnection: true,
@@ -984,14 +985,7 @@ const VideoMeetingRoom = () => {
 
   // Render Functions
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center" style={{width: '100%', maxWidth: 'none'}}>
-        <div className="text-center text-white">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto mb-4"></div>
-          <p>Loading meeting...</p>
-        </div>
-      </div>
-    );
+    return <LoadingSpinner message="Loading meeting…" />;
   }
 
   if (error) {
@@ -1021,8 +1015,14 @@ const VideoMeetingRoom = () => {
     const scheduled = meeting?.scheduledTime?.toDate
       ? meeting.scheduledTime.toDate()
       : new Date(meeting?.scheduledTime);
-    const isFutureMeeting = !isNaN(scheduled) && scheduled > new Date() && !meeting?.isActive;
-    const isEnded = !!meeting?.endedAt;
+    const now             = new Date();
+    const isFutureMeeting = !isNaN(scheduled) && scheduled > now && !meeting?.isActive;
+    const isEnded         = !!meeting?.endedAt;
+    // Meeting is 'missed' if: not active, not ended, scheduled time has passed by >10 min
+    const minutesPast     = !meeting?.isActive && !isEnded && !isNaN(scheduled) && scheduled < now
+      ? (now - scheduled) / 60_000
+      : 0;
+    const isMissed = minutesPast > 10;
 
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center px-4" style={{ width: '100%', maxWidth: 'none' }}>
@@ -1052,35 +1052,67 @@ const VideoMeetingRoom = () => {
             </>
           ) : isHost ? (
             <>
-              <p className="text-gray-300 mb-6">
-                {isFutureMeeting
-                  ? "This meeting is scheduled for later, but you can start it early whenever you're ready."
-                  : "You're hosting this meeting. Start it whenever you're ready."}
-              </p>
-              <button
-                onClick={handleStartMeeting}
-                disabled={starting}
-                className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white rounded-xl font-semibold transition-colors"
-              >
-                {starting ? (
-                  <>
-                    <span className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                    Starting…
-                  </>
-                ) : (
-                  'Start Meeting'
-                )}
-              </button>
+              {isMissed ? (
+                <>
+                  <p className="text-red-400 mb-2 font-semibold">This meeting wasn't started in time.</p>
+                  <p className="text-gray-400 text-sm mb-6">
+                    Meetings can only be started within 10 minutes of their scheduled time.
+                    Please schedule a new meeting.
+                  </p>
+                  <button
+                    onClick={() => navigate(`/course/${meeting?.courseId}`)}
+                    className="w-full px-6 py-3 bg-gray-700 text-white rounded-xl hover:bg-gray-600 font-semibold transition-colors"
+                  >
+                    Back to Course
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="text-gray-300 mb-6">
+                    {isFutureMeeting
+                      ? "This meeting is scheduled for later, but you can start it early whenever you're ready."
+                      : "You're hosting this meeting. Start it whenever you're ready."}
+                  </p>
+                  <button
+                    onClick={handleStartMeeting}
+                    disabled={starting}
+                    className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white rounded-xl font-semibold transition-colors"
+                  >
+                    {starting ? (
+                      <>
+                        <span className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                        Starting…
+                      </>
+                    ) : (
+                      'Start Meeting'
+                    )}
+                  </button>
+                </>
+              )}
             </>
           ) : meeting?.isActive ? (
             <>
-              <p className="text-gray-300 mb-6">The host has started this meeting. You can join now.</p>
-              <button
-                onClick={handleJoinMeeting}
-                className="w-full px-6 py-3 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-semibold transition-colors"
-              >
-                Join Meeting
-              </button>
+              {isHost ? (
+                <>
+                  <p className="text-gray-300 mb-6">Your meeting is live. Rejoin it below.</p>
+                  <button
+                    onClick={handleJoinMeeting}
+                    className="w-full px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-semibold transition-colors"
+                  >
+                    Rejoin Meeting
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="text-gray-300 mb-6">The host has started this meeting. You can join now.</p>
+                  <button
+                    onClick={handleJoinMeeting}
+                    className="w-full px-6 py-3 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-semibold transition-colors"
+                  >
+                    Join Meeting
+                  </button>
+                </>
+              )}
             </>
           ) : (
             <>

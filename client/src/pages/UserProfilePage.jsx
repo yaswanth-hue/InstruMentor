@@ -45,6 +45,7 @@ import {
 } from 'lucide-react';
 import MagneticCard from '../components/MagneticCard';
 import LazyImage from '../components/LazyImage';
+import LoadingSpinner from '../components/LoadingSpinner';
 
 
 const ProfilePage = () => {
@@ -745,12 +746,7 @@ const ProfilePage = () => {
               <div className="rounded-3xl border border-white/10 bg-zinc-900/60 backdrop-blur-2xl shadow-2xl shadow-black/40 p-6">
                 {/* When data is still loading, show content skeleton here (no full-screen loader) */}
                 {loading && (
-                  <div className="space-y-4">
-                    <div className="h-4 w-1/3 rounded bg-white/10 animate-pulse" />
-                    <div className="h-3 w-full rounded bg-white/10 animate-pulse" />
-                    <div className="h-3 w-5/6 rounded bg-white/10 animate-pulse" />
-                    <div className="h-10 w-full rounded-2xl bg-white/10 animate-pulse" />
-                  </div>
+                  <LoadingSpinner fullScreen={false} size="sm" message="Loading profile…" />
                 )}
 
             {/* User Name */}
@@ -1186,13 +1182,7 @@ const ProfilePage = () => {
               const reelPostsLocal = reelPosts;
 
               if (loading) {
-                return (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {[1, 2, 3, 4, 5, 6].map((i) => (
-                      <div key={i} className="aspect-square rounded-2xl bg-slate-800 animate-pulse"></div>
-                    ))}
-                  </div>
-                );
+                return <LoadingSpinner fullScreen={false} size="sm" message="Loading reels…" />;
               }
 
               if (reelPostsLocal.length === 0) {
@@ -1296,13 +1286,7 @@ const ProfilePage = () => {
               }
 
               if (loading) {
-                return (
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {[1, 2, 3, 4, 5, 6].map((i) => (
-                      <div key={i} className="aspect-square rounded-2xl bg-slate-800 animate-pulse"></div>
-                    ))}
-                  </div>
-                );
+                return <LoadingSpinner fullScreen={false} size="sm" message="Loading tagged posts…" />;
               }
 
               if (taggedPosts.length === 0) {

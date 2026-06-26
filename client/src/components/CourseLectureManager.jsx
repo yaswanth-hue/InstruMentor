@@ -20,6 +20,7 @@ import {
   reorderCourseMaterials,
   auth
 } from '../firebase';
+import LoadingSpinner from './LoadingSpinner';
 
 const CourseLectureManager = ({ courseId, isInstructor, onMaterialsChange }) => {
   const [materials, setMaterials] = useState([]);
@@ -156,11 +157,7 @@ const CourseLectureManager = ({ courseId, isInstructor, onMaterialsChange }) => 
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader className="w-8 h-8 text-purple-600 animate-spin" />
-      </div>
-    );
+    return <LoadingSpinner fullScreen={false} message="Loading lectures…" />;
   }
 
   return (

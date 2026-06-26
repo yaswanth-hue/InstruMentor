@@ -15,6 +15,7 @@ import {
   BookOpen,
   Clock
 } from 'lucide-react';
+import LoadingSpinner from './LoadingSpinner';
 
 const MeetingRecordingPlayer = ({ meetingId, recordingUrl, title, onProgressUpdate }) => {
   const videoRef = useRef(null);
@@ -225,10 +226,7 @@ const MeetingRecordingPlayer = ({ meetingId, recordingUrl, title, onProgressUpda
   if (loading) {
     return (
       <div className="bg-black aspect-video flex items-center justify-center rounded-lg">
-        <div className="text-white text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
-          <p>Loading video...</p>
-        </div>
+        <LoadingSpinner fullScreen={false} message="Loading video…" />
       </div>
     );
   }

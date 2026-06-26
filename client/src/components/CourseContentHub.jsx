@@ -6,6 +6,7 @@ import {
   ChevronUp, Film, Sparkles, Paperclip, FileText,
   Phone, CheckCircle2, AlertCircle, ChevronLeft, ChevronRight
 } from 'lucide-react';
+import LoadingSpinner from './LoadingSpinner';
 import {
   uploadCourseMaterial,
   getCourseMaterials,
@@ -53,11 +54,6 @@ const formatRelative = (timestamp) => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
-/* If a meeting's scheduled time passes by more than this and the host
-   never started it, treat it as Missed instead of leaving it
-   startable forever. */
-const MISSED_GRACE_PERIOD_MS = 30 * 60 * 1000; // 30 minutes
-
 /* ─── Empty state ──────────────────────────────────────────────────────────── */
 const EmptyState = ({ icon: Icon, title, subtitle }) => (
   <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -73,7 +69,7 @@ const EmptyState = ({ icon: Icon, title, subtitle }) => (
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const DAYS   = ['Su','Mo','Tu','We','Th','Fr','Sa'];
 const HOURS  = Array.from({ length: 12 }, (_, i) => String(i === 0 ? 12 : i).padStart(2, '0'));
-const MINS   = ['00','15','30','45'];
+const MINS   = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
 
 /* Convert 12h+ampm → 24h integer */
 const to24 = (h, ap) => {
@@ -132,17 +128,15 @@ const DateTimePicker = ({ value, onChange }) => {
       date.getDate()     === now.getDate();
     if (!isToday) return { h: hour, m: minute, ap: ampm };
 
-    // find next valid 15-min slot
-    const nowMins = now.getHours() * 60 + now.getMinutes() + 1; // +1 = strictly future
-    const nextSlot = Math.ceil(nowMins / 15) * 15;
+    // find next valid 1-min slot (strictly future)
+    const nowMins = now.getHours() * 60 + now.getMinutes() + 1;
+    const nextSlot = nowMins; // 1-minute granularity — no snapping needed
     const nextH24  = Math.floor(nextSlot / 60) % 24;
     const nextMin  = nextSlot % 60;
     const nextAp   = nextH24 >= 12 ? 'PM' : 'AM';
     const nextH12  = String(nextH24 % 12 || 12).padStart(2, '0');
     const nextM    = String(nextMin).padStart(2, '0');
-    // snap minute to grid
-    const snappedM = MINS.find(m => parseInt(m) >= parseInt(nextM)) ?? '00';
-    return { h: nextH12, m: snappedM, ap: nextAp };
+    return { h: nextH12, m: nextM, ap: nextAp };
   };
 
   const commit = (date, h, m, ap) => {
@@ -320,23 +314,26 @@ const DateTimePicker = ({ value, onChange }) => {
           </div>
         </div>
 
-        {/* minutes */}
-        <div className="flex gap-2 mt-2">
-          {MINS.map(m => {
-            const past = isMinutePast(m);
-            return (
-              <button key={m} type="button" disabled={past} onClick={() => changeMin(m)}
-                className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  minute === m && !past
-                    ? 'bg-violet-600 text-white'
-                    : past
-                    ? 'text-slate-700 cursor-not-allowed bg-slate-900/30'
-                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white'
-                }`}>
-                :{m}
-              </button>
-            );
-          })}
+        {/* minutes — scrollable grid, 1-minute granularity */}
+        <div className="mt-2">
+          <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Minute</p>
+          <div className="h-20 overflow-y-auto rounded-lg border border-slate-700/60 bg-slate-900/60 grid grid-cols-6 gap-0.5 p-1 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-transparent">
+            {MINS.map(m => {
+              const past = isMinutePast(m);
+              return (
+                <button key={m} type="button" disabled={past} onClick={() => changeMin(m)}
+                  className={`py-1 rounded text-xs font-semibold transition-colors ${
+                    minute === m && !past
+                      ? 'bg-violet-600 text-white'
+                      : past
+                      ? 'text-slate-700 cursor-not-allowed'
+                      : 'text-slate-400 hover:bg-slate-700 hover:text-white'
+                  }`}>
+                  :{m}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -484,6 +481,16 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
   // its scheduled time. Marks it active in Firestore first so the
   // status is correct, then opens the meeting room.
   const handleStartMeeting = async (meetingId) => {
+    // Guard: refuse if the 10-minute start window has already closed
+    const mtg = meetings.find(m => m.id === meetingId);
+    if (mtg && !mtg.isActive && !mtg.endedAt) {
+      const scheduled = mtg.scheduledTime?.toDate ? mtg.scheduledTime.toDate() : new Date(mtg.scheduledTime);
+      if (scheduled < new Date() && (new Date() - scheduled) / 60_000 > 10) {
+        // treat as missed — update local state so the UI reflects it immediately
+        setMeetings(p => p.map(m => m.id === meetingId ? { ...m, _missed: true } : m));
+        return;
+      }
+    }
     setStartingMeetingId(meetingId);
     try {
       await startMeeting(meetingId);
@@ -538,14 +545,7 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
     setDraggedItem(null);
   };
 
-  if (loading) return (
-    <div className="flex items-center justify-center py-16">
-      <div className="flex flex-col items-center gap-3">
-        <div className="w-8 h-8 rounded-full border-2 border-sky-500/30 border-t-sky-500 animate-spin" />
-        <p className="text-slate-400 text-sm">Loading content…</p>
-      </div>
-    </div>
-  );
+  if (loading) return <LoadingSpinner fullScreen={false} message="Loading content…" />;
 
   /* ─── Render ── */
   return (
@@ -714,15 +714,14 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                 const isEnded     = !!meeting.endedAt;
                 const isLive      = !!meeting.isActive && !isEnded;
                 // "Overdue" = scheduled time has passed but the host
-                // never started it, and we're still within the grace
-                // window — still startable. Past the grace window
-                // with no start, it's "Missed" — not startable.
-                const msSincePast = now - meetingDate;
-                const isOverdue   = !isLive && !isEnded && msSincePast > 0 && msSincePast <= MISSED_GRACE_PERIOD_MS;
-                const isMissed    = !isLive && !isEnded && msSincePast > MISSED_GRACE_PERIOD_MS;
+                // never started it. It's still startable/joinable —
+                // NOT finished. Only isEnded means finished.
+                const minutesPast = !isLive && !isEnded && meetingDate < now ? (now - meetingDate) / 60_000 : -1;
+                const isOverdue   = minutesPast >= 0 && minutesPast <= 10;
+                const isMissed    = minutesPast > 10;
                 const isFinished  = isEnded || isMissed;
                 const isExpanded  = expandedMeeting === meeting.id;
-                const relative    = isLive ? '● Live Now' : isOverdue ? 'Ready to Start' : isMissed ? 'Missed' : formatRelative(meeting.scheduledTime);
+                const relative    = isLive ? '● Live Now' : isMissed ? 'Missed' : isOverdue ? 'Ready to Start' : formatRelative(meeting.scheduledTime);
                 const isStarting  = startingMeetingId === meeting.id;
 
                 return (
@@ -744,9 +743,11 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                           ? 'bg-slate-800 border border-slate-700'
                           : isLive
                           ? 'bg-emerald-500/20 border border-emerald-500/30'
+                          : isMissed
+                          ? 'bg-red-500/10 border border-red-500/20'
                           : 'bg-gradient-to-br from-violet-600/30 to-blue-600/30 border border-violet-500/20'
                       }`}>
-                        <Calendar className={`w-4 h-4 ${isFinished ? 'text-slate-500' : isLive ? 'text-emerald-300' : 'text-violet-300'}`} />
+                        <Calendar className={`w-4 h-4 ${isFinished ? 'text-slate-500' : isLive ? 'text-emerald-300' : isMissed ? 'text-red-400' : 'text-violet-300'}`} />
                       </div>
 
                       <div className="flex-1 min-w-0">
@@ -754,13 +755,9 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                           <h3 className={`text-sm font-semibold truncate ${isFinished ? 'text-slate-400' : 'text-slate-100'}`}>
                             {meeting.title}
                           </h3>
-                          {isEnded ? (
+                          {isFinished ? (
                             <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-500 font-medium">
                               Ended
-                            </span>
-                          ) : isMissed ? (
-                            <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-500 font-medium">
-                              Missed
                             </span>
                           ) : isLive ? (
                             <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-medium animate-pulse">
@@ -799,12 +796,6 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
                       >
                         {meeting.description && (
                           <p className="text-sm text-slate-400 leading-relaxed">{meeting.description}</p>
-                        )}
-                        {isMissed && (
-                          <p className="text-xs text-slate-500 flex items-center gap-1.5">
-                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                            This meeting was never started and has expired.
-                          </p>
                         )}
                         {!isFinished && (
                           <div className="flex items-center gap-2">

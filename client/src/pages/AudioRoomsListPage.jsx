@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import CreateRoomModal from '../components/CreateRoomModal';
 import PasswordModal from '../components/PasswordModal';
+import LoadingSpinner from '../components/LoadingSpinner';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_SERVER_URL || 'http://localhost:3001';
 
@@ -98,19 +99,7 @@ const AudioRoomsListPage = () => {
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900 flex items-center justify-center" style={{ width: '100%', maxWidth: 'none' }}>
-        <div className="text-center space-y-4">
-          <div className="relative w-16 h-16 mx-auto">
-            <div className="w-16 h-16 rounded-full border-4 border-slate-700 border-t-sky-500 animate-spin" />
-            <div className="absolute inset-0 flex items-center justify-center">
-              <Radio className="w-6 h-6 text-sky-400 animate-pulse" />
-            </div>
-          </div>
-          <p className="text-slate-400 text-sm font-medium">Loading rooms…</p>
-        </div>
-      </div>
-    );
+    return <LoadingSpinner message="Loading rooms…" />;
   }
 
   return (

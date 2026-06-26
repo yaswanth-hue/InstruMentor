@@ -23,7 +23,7 @@ export default defineConfig({
           'firebase-core': ['firebase/app', 'firebase/auth'],
           'firebase-data': ['firebase/firestore', 'firebase/database'],
           // Group media libraries
-          'media': ['simple-peer', 'peerjs', 'socket.io-client'],
+          'media': ['socket.io-client'],
         },
         // Optimize chunk sizes for 3G (reduce request count)
         chunkFileNames: 'assets/js/[name]-[hash].js',

@@ -9,7 +9,7 @@ import {
     corsOptions,
     securityLogger,
     contentSizeLimiter
-} from '../middleware/security.js';
+} from './middleware/security.js';
 
 const app = express();
 

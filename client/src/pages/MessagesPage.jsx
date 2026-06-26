@@ -12,6 +12,7 @@ import {
 } from '../firebase';
 import { collection, onSnapshot, query, where, orderBy } from 'firebase/firestore';
 import { Mail, Send, Check, X, MessageCircle, User, MoreVertical, Search, ArrowLeft, PlaySquare, PanelRightOpen, PanelRightClose } from 'lucide-react';
+import LoadingSpinner from '../components/LoadingSpinner';
 
 const MessagesPage = () => {
   const navigate = useNavigate();
@@ -551,10 +552,7 @@ const MessagesPage = () => {
 
                 <div className="flex-1 overflow-y-auto p-4">
                   {socialLoading ? (
-                    <div className="py-12 text-center text-slate-400">
-                      <div className="mx-auto h-10 w-10 rounded-full border-b-2 border-sky-500 animate-spin" />
-                      <p className="mt-3 text-sm">Loading…</p>
-                    </div>
+                    <LoadingSpinner fullScreen={false} size="sm" message="Loading…" />
                   ) : visibleSocialItems.length === 0 ? (
                     <div className="py-12 text-center text-slate-400">
                       <PlaySquare className="w-10 h-10 text-slate-600 mx-auto mb-3" />

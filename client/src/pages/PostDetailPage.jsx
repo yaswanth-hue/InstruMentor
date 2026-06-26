@@ -13,6 +13,7 @@ import {
   Send,
   Bookmark
 } from 'lucide-react';
+import LoadingSpinner from '../components/LoadingSpinner';
 
 const PostDetailPage = () => {
   const { postId } = useParams();
@@ -201,14 +202,7 @@ const PostDetailPage = () => {
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center" style={{width: '100%', maxWidth: 'none'}}>
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-16 w-16 border-4 border-gray-200 border-t-gray-800 mb-4"></div>
-          <p className="text-gray-800 font-medium">Loading post...</p>
-        </div>
-      </div>
-    );
+    return <LoadingSpinner message="Loading post…" />;
   }
 
   if (!post || !postOwner) {

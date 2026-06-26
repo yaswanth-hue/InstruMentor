@@ -16,6 +16,7 @@ import {
   Copy,
   Link as LinkIcon
 } from 'lucide-react';
+import LoadingSpinner from '../components/LoadingSpinner';
 
 const defaultForm = {
   displayName: '',
@@ -143,18 +144,7 @@ const ProfileSettingsPage = () => {
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-zinc-950 via-neutral-950 to-zinc-950 text-white" style={{ width: '100%', maxWidth: 'none' }}>
-        <div className="w-full px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-          <div className="mx-auto max-w-4xl space-y-4">
-            <div className="h-16 rounded-2xl border border-slate-800 bg-slate-900/60 animate-pulse" />
-            <div className="h-56 rounded-3xl border border-slate-800 bg-slate-900/60 animate-pulse" />
-            <div className="h-56 rounded-3xl border border-slate-800 bg-slate-900/60 animate-pulse" />
-            <div className="h-44 rounded-3xl border border-slate-800 bg-slate-900/60 animate-pulse" />
-          </div>
-        </div>
-      </div>
-    );
+    return <LoadingSpinner message="Loading your profile…" />;
   }
 
   return (

@@ -1,7 +1,7 @@
 import express from 'express';
 import * as roomController from '../controllers/roomController.js';
 import * as meetingController from '../controllers/meetingController.js';
-import { apiLimiter, validateRoomCreation } from '../../middleware/security.js';
+import { apiLimiter, validateRoomCreation } from '../middleware/security.js';
 
 const router = express.Router();
 
