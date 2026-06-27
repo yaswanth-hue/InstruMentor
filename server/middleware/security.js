@@ -99,6 +99,7 @@ export const validateRoomCreation = [
   body('description').optional().trim().isLength({ max: 500 }).withMessage('Description too long'),
   body('max_participants').optional().isInt({ min: 2, max: 100 }).withMessage('Invalid participant limit'),
   body('host_name').trim().notEmpty().withMessage('Host name is required'),
+  body('password').if(body('is_private').equals(true)).isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
   (req, res, next) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {

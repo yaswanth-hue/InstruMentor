@@ -9,6 +9,7 @@ const router = express.Router();
 router.get('/audio-rooms', apiLimiter, roomController.getRooms);
 router.post('/audio-rooms', apiLimiter, validateRoomCreation, roomController.createRoom);
 router.get('/audio-rooms/:id', roomController.getRoom);
+router.post('/audio-rooms/:id/verify-password', apiLimiter, roomController.verifyRoomAccess);
 router.put('/audio-rooms/:id/settings', roomController.updateRoomSettings);
 router.delete('/audio-rooms/:id', roomController.deleteRoom);
 router.get('/audio-rooms/:id/participants', roomController.getParticipants);

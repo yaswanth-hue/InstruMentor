@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { X, Lock, Users, MessageSquare, Image, Radio, Loader } from 'lucide-react';
-import bcrypt from 'bcryptjs';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_SERVER_URL || 'http://localhost:3001';
 
@@ -39,11 +38,6 @@ const CreateRoomModal = ({ isOpen, onClose, onCreateRoom, user }) => {
 
     setIsCreating(true);
     try {
-      let passwordHash = null;
-      if (formData.isPrivate && formData.password) {
-        passwordHash = await bcrypt.hash(formData.password, await bcrypt.genSalt(10));
-      }
-
       const response = await fetch(`${SOCKET_URL}/api/audio-rooms`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -56,7 +50,7 @@ const CreateRoomModal = ({ isOpen, onClose, onCreateRoom, user }) => {
           allow_chat: formData.allowChat,
           allow_media: formData.allowMedia,
           is_private: formData.isPrivate,
-          password_hash: passwordHash
+          password: formData.isPrivate ? formData.password : null
         })
       });
 

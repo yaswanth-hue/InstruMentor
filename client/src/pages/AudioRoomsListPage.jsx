@@ -4,7 +4,6 @@ import { Helmet } from 'react-helmet-async';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../firebase';
 import { io } from 'socket.io-client';
-import bcrypt from 'bcryptjs';
 import {
   Lock, Users, MessageSquare, Image, Plus, Home, Clock,
   AlertCircle, Wifi, WifiOff, Radio, Mic
@@ -78,7 +77,7 @@ const AudioRoomsListPage = () => {
   }, [fetchAudioRooms]);
 
   const handleJoinRoom = async (room) => {
-    if (room.is_private && room.password_hash) {
+    if (room.is_private) {
       setSelectedRoom(room);
       setShowPasswordModal(true);
     } else {
@@ -88,8 +87,13 @@ const AudioRoomsListPage = () => {
 
   const handlePasswordSubmit = async (password) => {
     if (!selectedRoom) return;
-    const isValid = await bcrypt.compare(password, selectedRoom.password_hash);
-    if (!isValid) throw new Error('Incorrect password');
+    const response = await fetch(`${SOCKET_URL}/api/audio-rooms/${selectedRoom.id}/verify-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    });
+    const { valid } = await response.json();
+    if (!valid) throw new Error('Incorrect password');
     setShowPasswordModal(false);
     navigate(`/audio-room/${selectedRoom.id}`);
   };

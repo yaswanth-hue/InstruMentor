@@ -1,15 +1,23 @@
 import { stateService } from '../services/stateService.js';
+import { hashRoomPassword, verifyRoomPassword } from '../utils/passwordSecurity.js';
 
 export const getRooms = async (req, res) => {
     const rooms = await stateService.getRooms();
-    res.json(rooms);
+    const publicRooms = rooms.map(({ password_hash, ...rest }) => rest);
+    res.json(publicRooms);
 };
 
 export const createRoom = async (req, res) => {
     const {
         title, description, host_id, host_name, max_participants = 10,
-        allow_chat = true, allow_media = false, is_private = false, password_hash = null
+        allow_chat = true, allow_media = false, is_private = false, password = null
     } = req.body;
+
+    if (is_private && !password) {
+        return res.status(400).json({ error: 'Password is required for private rooms' });
+    }
+
+    const password_hash = is_private ? await hashRoomPassword(password) : null;
 
     const newRoom = {
         id: Date.now().toString(),
@@ -24,17 +32,36 @@ export const createRoom = async (req, res) => {
 
     // Broadcast new room to all list-page clients (exclude password_hash)
     if (req.io) {
-        const publicRoom = { ...newRoom, password_hash: undefined };
+        const { password_hash: _omit, ...publicRoom } = newRoom;
         req.io.emit('room-created', publicRoom);
     }
 
-    res.json(newRoom);
+    const { password_hash: _omit, ...publicRoom } = newRoom;
+    res.json(publicRoom);
 };
 
 export const getRoom = async (req, res) => {
     const room = await stateService.getRoom(req.params.id);
     if (!room) return res.status(404).json({ error: 'Room not found' });
-    res.json(room);
+    const { password_hash, ...publicRoom } = room;
+    res.json(publicRoom);
+};
+
+export const verifyRoomAccess = async (req, res) => {
+    const room = await stateService.getRoom(req.params.id);
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+
+    if (!room.is_private || !room.password_hash) {
+        return res.json({ valid: true });
+    }
+
+    const { password } = req.body;
+    if (!password) {
+        return res.status(400).json({ error: 'Password is required' });
+    }
+
+    const isValid = await verifyRoomPassword(password, room.password_hash);
+    res.json({ valid: isValid });
 };
 
 export const updateRoomSettings = async (req, res) => {
