@@ -82,8 +82,7 @@ That split keeps the durable social/learning data simple and consistent while le
                            ┌──────────────────────────────────┐
                            │      Mesh WebRTC Peer Links      │
                            │                                  │
-                           │ • RTCPeerConnection              │
-                           │ • simple-peer                    │
+                           │ • Native RTCPeerConnection       │
                            │ • Audio + Video streams          │
                            │ • Browser-to-browser media       │
                            └──────────────────────────────────┘
@@ -93,52 +92,57 @@ That split keeps the durable social/learning data simple and consistent while le
 
 ## Tech Stack
 
-**Frontend**
+**Frontend** (`client/`)
 - React 19 + React Router 7 (lazy-loaded routes, `Suspense` boundaries, error boundaries)
-- Vite 6 with a hand-tuned `manualChunks` build (React, Firebase, and media libraries split into dedicated bundles to minimize HTTP requests on slow connections)
+- Vite 6 with a hand-tuned `manualChunks` build (React, Firebase, and Socket.IO split into dedicated bundles to minimize HTTP requests on slow connections)
 - Tailwind CSS 4 (Vite plugin, no PostCSS config needed)
-- GSAP for animation, Lottie for vector animations, `react-easy-crop` for avatar/image cropping
+- GSAP for animation, `react-easy-crop` for avatar/image cropping
 
 **Real-time backend** (`server/`)
-- Express 5 + Socket.IO 4, organized into `routes/` (REST), `sockets/` (event handlers), `controllers/`, and `services/` (state)
+- Express 5 + Socket.IO 4, organized into `routes/` (REST), `sockets/` (event handlers), `controllers/`, `services/` (state), and `utils/` (shared helpers)
 - In-memory `stateService` (plain `Map`s) for rooms, participants, chat history, sessions, and meeting progress
-- WebRTC signaling via Socket.IO events; actual audio/video flows peer-to-peer using native `RTCPeerConnection` (video meetings) and `simple-peer` / PeerJS (audio rooms)
-- `mediasoup` is included as a dependency for a possible future SFU-based upgrade, but the current implementation is mesh P2P, not SFU-routed
+- WebRTC signaling via Socket.IO events; actual audio/video flows peer-to-peer using native `RTCPeerConnection` — both video meetings and audio rooms are mesh P2P, no SFU/media-server dependency
 
 **Persistence & content**
-- Firebase Auth (users), Firestore (posts, comments, courses, resources), Realtime Database, and Storage (media uploads)
+- Firebase Auth (users), Firestore (posts, comments, courses, resources), Realtime Database, and Storage (media uploads), via `firebase` (client SDK) and `firebase-admin` (server SDK)
 
 **Security**
-- Helmet (CSP, HSTS, frame/sniff protections), `express-rate-limit` (general/strict/API tiers), `hpp`, a custom request sanitizer, `express-validator`, and `bcryptjs`-based hashing utilities for data that isn't covered by Firebase Auth (e.g. room passcodes)
+- Helmet (CSP, HSTS, frame/sniff protections), `express-rate-limit` (general/strict/API tiers), `hpp`, a custom request sanitizer, `express-validator`, and `bcryptjs`-based hashing for data that isn't covered by Firebase Auth (e.g. room passcodes) — hashing and verification both happen server-side; the client only ever sends/receives plaintext over TLS, never a hash
 
 ## Project Structure
 
 ```
-Retro/
-├── server/                    # Real-time + REST backend (Express + Socket.IO)
-│   ├── app.js                  # Express app, security middleware pipeline
-│   ├── index.js                # HTTP server bootstrap + Socket.IO init
-│   ├── routes/api.js           # REST endpoints (rooms, course meetings, progress)
-│   ├── controllers/            # Room & meeting request handlers
-│   ├── services/stateService.js  # In-memory state store
-│   └── sockets/                 # join/leave, chat, host controls, signaling
-├── middleware/security.js      # Helmet, rate limiters, CORS, sanitization
-├── utils/passwordSecurity.js   # bcrypt/crypto helpers for non-Firebase secrets
-├── src/
-│   ├── pages/                   # Route-level views (lazy-loaded except auth/landing)
-│   ├── components/               # Shared UI (rooms, video, cards, social widgets)
-│   ├── components/social/        # Feed-specific widgets (stories, trending, quick access)
-│   ├── hooks/                    # e.g. useOptimizedQuery (caching query hook)
-│   ├── lib/                      # Firestore helper functions (comments, interactions)
-│   ├── utils/                    # Client-side cache/pagination/perf helpers
-│   ├── config/socketConfig.js    # Socket.IO client connection config
-│   ├── firebase.js               # Firebase SDK init (Auth, Firestore, RTDB, Storage)
-│   ├── App.jsx                   # Router + auth-gated routes
-│   └── main.jsx                  # Entry point
-├── public/                     # Static assets
-├── vite.config.js
-└── package.json
+InstruMentor/
+├── package.json                # Orchestrator — runs client + server together
+├── client/
+│   ├── package.json              # Frontend dependencies only
+│   ├── vite.config.js
+│   ├── index.html
+│   ├── public/                   # Static assets
+│   └── src/
+│       ├── pages/                  # Route-level views (lazy-loaded except auth/landing)
+│       ├── components/             # Shared UI (rooms, video, cards, social widgets)
+│       ├── components/social/      # Feed-specific widgets (stories, trending, quick access)
+│       ├── hooks/                  # e.g. useOptimizedQuery (caching query hook)
+│       ├── lib/                    # Firestore helper functions (comments, interactions)
+│       ├── utils/                  # Client-side cache/pagination/perf helpers
+│       ├── config/socketConfig.js  # Socket.IO client connection config
+│       ├── firebase.js             # Firebase SDK init (Auth, Firestore, RTDB, Storage)
+│       ├── App.jsx                 # Router + auth-gated routes
+│       └── main.jsx                # Entry point
+└── server/
+    ├── package.json              # Backend dependencies only
+    ├── app.js                     # Express app, security middleware pipeline
+    ├── index.js                   # HTTP server bootstrap + Socket.IO init
+    ├── routes/api.js              # REST endpoints (rooms, course meetings, progress)
+    ├── controllers/               # Room & meeting request handlers
+    ├── services/stateService.js   # In-memory state store
+    ├── sockets/                    # join/leave, chat, host controls, signaling
+    ├── middleware/security.js     # Helmet, rate limiters, CORS, sanitization
+    └── utils/passwordSecurity.js  # bcryptjs helpers for non-Firebase secrets (room passwords)
 ```
+
+`client/` and `server/` are independent npm workspaces — each has its own `package.json`, `node_modules`, and `.env`. There are no cross-imports between them; the only connection is HTTP/WebSocket calls over `VITE_SOCKET_SERVER_URL` / `CORS_ORIGIN`.
 
 ## Getting Started
 
@@ -150,61 +154,78 @@ Retro/
 
 ```bash
 git clone <your-repo-url>
-cd Retro
-npm install
+cd InstruMentor
+npm run install-all   # installs root, client/, and server/ dependencies
 ```
 
 ### Configure environment
 
+Each workspace has its own env file:
+
 ```bash
-cp .env.example .env
+cp client/.env.example client/.env
+cp server/.env.example server/.env
 ```
 
-Fill in your Firebase project credentials and server settings (see [Environment Variables](#environment-variables)).
+Fill in your Firebase project credentials in `client/.env` and your server settings in `server/.env` (see [Environment Variables](#environment-variables)).
 
 ### Run it
 
-This is two processes, run in two terminals:
+```bash
+npm run dev   # starts both client (5173) and server (3001) together via concurrently
+```
+
+Or run them separately in two terminals if you want isolated logs:
 
 ```bash
-# Terminal 1 — Vite dev server (the React app)
-npm run dev          # http://localhost:5173
-
-# Terminal 2 — Real-time/API server
-npm run server       # http://localhost:3001
-# or, with auto-restart on change:
-npm run server:dev   # requires nodemon installed (it isn't a listed dependency — add it or install globally)
+npm run client   # Vite dev server — http://localhost:5173
+npm run server   # Express + Socket.IO server — http://localhost:3001
 ```
 
 Audio rooms, video meetings, and chat all depend on the server in Terminal 2 being up. Everything else (auth, feed, courses, resources) talks to Firebase directly and will work even without it.
 
 ## Environment Variables
 
-| Variable | Used by | Purpose |
+| Variable | File | Purpose |
 |---|---|---|
-| `VITE_FIREBASE_API_KEY` … `VITE_FIREBASE_MEASUREMENT_ID` | Client | Standard Firebase SDK config |
-| `VITE_SOCKET_SERVER_URL` | Client | Where the React app connects for Socket.IO |
-| `PORT` | Server | Port for the Express/Socket.IO server (default `3001`) |
-| `CORS_ORIGIN` | Server | Comma-separated allowlist of origins permitted by CORS/Socket.IO |
-| `NODE_ENV` | Server | `development` \| `production` |
-| `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX_REQUESTS` | Server | Tunables for the general rate limiter |
-| `SESSION_SECRET`, `JWT_SECRET` | Server | Reserved for session/token signing if you extend auth beyond Firebase |
+| `VITE_FIREBASE_API_KEY` … `VITE_FIREBASE_MEASUREMENT_ID` | `client/.env` | Standard Firebase SDK config |
+| `VITE_SOCKET_SERVER_URL` | `client/.env` | Where the React app connects for Socket.IO |
+| `PORT` | `server/.env` | Port for the Express/Socket.IO server (default `3001`) |
+| `CORS_ORIGIN` | `server/.env` | Comma-separated allowlist of origins permitted by CORS/Socket.IO |
+| `NODE_ENV` | `server/.env` | `development` \| `production` |
+| `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX_REQUESTS` | `server/.env` | Tunables for the general rate limiter |
+| `SESSION_SECRET`, `JWT_SECRET` | `server/.env` | Reserved for session/token signing if you extend auth beyond Firebase |
 
-See `.env.example` for the full annotated list, including SSL/proxy settings that only matter if you put the server behind a load balancer yourself.
+See `client/.env.example` and `server/.env.example` for the full annotated lists, including SSL/proxy settings that only matter if you put the server behind a load balancer yourself.
 
 ## Available Scripts
+
+**Root** (`InstruMentor/package.json`)
+
+| Script | What it does |
+|---|---|
+| `npm run dev` | Runs `server` and `client` together via `concurrently` |
+| `npm run client` | Starts the Vite dev server (delegates to `client/`) |
+| `npm run server` | Starts the Express/Socket.IO server with nodemon (delegates to `server/`) |
+| `npm run install-all` | Installs root, `client/`, and `server/` dependencies in one command |
+| `npm run health` | curl the `/health` endpoint |
+
+**Client** (`client/package.json`)
 
 | Script | What it does |
 |---|---|
 | `npm run dev` | Start the Vite dev server |
-| `npm run build` | Production build to `dist/` (manual chunking for React/Firebase/media) |
+| `npm run build` | Production build to `client/dist/` (manual chunking for React/Firebase/Socket.IO) |
 | `npm run preview` | Preview the production build locally |
-| `npm run lint` | ESLint over the project |
-| `npm run server` | Start the Socket.IO/Express server |
-| `npm run server:dev` | Same, with nodemon (install it first) |
-| `npm run health` | curl the `/health` endpoint |
+| `npm run lint` | ESLint over the client source |
+
+**Server** (`server/package.json`)
+
+| Script | What it does |
+|---|---|
+| `npm start` | Start the server with plain `node` (production) |
+| `npm run dev` | Start the server with `nodemon` (auto-restart on change) |
 | `npm run security:audit` / `:fix` | `npm audit` wrappers |
-| `npm run docker:*`, `npm run scale:*` | Placeholders for a future Docker Compose + Nginx + Redis horizontal-scaling setup — there's no `docker-compose.yml` or `Dockerfile` in this repo yet, so these aren't runnable out of the box (see [Known Limitations](#known-limitations--roadmap)) |
 
 ## Real-Time Layer in Detail
 
@@ -218,30 +239,32 @@ The Socket.IO server (`server/sockets/`) is the backbone for both audio rooms an
 
 ## Security
 
-The Express app runs every request through a fixed middleware pipeline (`server/app.js` → `middleware/security.js`):
+The Express app runs every request through a fixed middleware pipeline (`server/app.js` → `server/middleware/security.js`):
 
 `Helmet (CSP/HSTS/frameguard) → CORS allowlist → body size limits → HPP protection → custom input sanitizer → request logging → rate limiting`
 
 A few specifics worth knowing:
 - Three rate-limit tiers exist (`generalLimiter`, `strictLimiter` for sensitive actions, `apiLimiter` for API routes) — wire `strictLimiter` into any auth-adjacent endpoints you add.
 - The sanitizer strips `<script>`/`<iframe>` tags and inline event handlers from request bodies/query/params, while explicitly skipping fields like `password_hash` and `token` so hashes aren't mangled.
-- `utils/passwordSecurity.js` provides bcrypt-based hashing for things Firebase Auth doesn't cover (e.g. a private room's passcode) — Firebase still owns actual user password hashing.
+- `server/utils/passwordSecurity.js` provides `bcryptjs`-based hashing for things Firebase Auth doesn't cover (private room passcodes) — Firebase still owns actual user password hashing. Hashing and verification happen entirely server-side: `POST /api/audio-rooms` accepts a plaintext password and hashes it before storing; `GET /api/audio-rooms*` never returns `password_hash` to the client; a dedicated `POST /api/audio-rooms/:id/verify-password` checks a submitted plaintext password against the stored hash and returns only `{ valid: boolean }`. The client never sees or computes a hash.
 - CORS origins and rate-limit thresholds are environment-driven, not hardcoded.
 
 ## Build & Deployment
 
-The frontend and real-time server are deployed as two separate things:
+The frontend and real-time server are deployed as two separate Render services, sharing one repo via Root Directory:
 
-- **Frontend** (`npm run build` → `dist/`): any static host works well — Vercel, Netlify, Cloudflare Pages, or Firebase Hosting.
-- **Server** (`server/`): needs a host that supports long-lived WebSocket connections (Render, Railway, Fly.io, or a plain VM/container). As shipped, it runs as a single process with in-memory state — see [Known Limitations](#known-limitations--roadmap) before you scale it horizontally.
+- **Frontend** — Static Site, Root Directory `client`, Build Command `npm install && npm run build`, Publish Directory `dist`.
+- **Server** — Web Service, Root Directory `server`, Build Command `npm install`, Start Command `npm start`. Needs a host that supports long-lived WebSocket connections (Render, Railway, Fly.io, or a plain VM/container also work). As shipped, it runs as a single process with in-memory state — see [Known Limitations](#known-limitations--roadmap) before you scale it horizontally.
+
+Set each service's environment variables in its own Render dashboard (not from a committed `.env` — those are gitignored). The backend's `CORS_ORIGIN` needs to include the deployed frontend URL, and the frontend's `VITE_SOCKET_SERVER_URL` needs to point at the deployed backend URL — not `localhost`.
 
 ## Known Limitations & Roadmap
 
 Being upfront about the current state so it's easy to plan around:
 
 - **Single-instance, in-memory state.** Rooms, participants, and session chat history live in a JS `Map` inside one Node process. Restarting the server clears all active rooms; running multiple instances behind a load balancer will *not* share state out of the box.
-- **No horizontal scaling implemented yet.** The `docker:*`/`scale:*` npm scripts anticipate a future Docker Compose + Nginx + Redis setup, but that infrastructure isn't in this repo. The natural next step would be a `socket.io-redis` adapter plus moving `stateService` onto Redis.
-- **Mesh WebRTC doesn't scale past a handful of participants per room** by nature (each browser opens a connection to every other browser). `mediasoup` is already a dependency if you want to move to an SFU model for larger rooms.
+- **No horizontal scaling implemented yet.** The natural next step would be a `socket.io-redis` adapter plus moving `stateService` onto Redis. No Docker/Nginx config exists in this repo yet — that's a deliberate future addition, not a stripped-down placeholder.
+- **Mesh WebRTC doesn't scale past a handful of participants per room** by nature (each browser opens a connection to every other browser). Moving to an SFU model (e.g. `mediasoup`) would be the path to larger rooms, but that's not implemented currently.
 - **No automated test suite** is currently included.
 
 ## License
