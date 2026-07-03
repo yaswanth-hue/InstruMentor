@@ -31,8 +31,16 @@ import {
 } from 'lucide-react';
 import { auth, getMeetingById, getCourseById, startMeeting, endMeeting } from '../firebase';
 import LoadingSpinner from './LoadingSpinner';
+import { getSocketServerUrl } from '../config/socketConfig';
 
-const socket = io.connect('http://localhost:3001', {
+// IMPORTANT: this must come from VITE_SOCKET_SERVER_URL (falling back to
+// localhost only for same-machine dev), NOT a hardcoded 'localhost:3001'.
+// A hardcoded localhost URL works when you and the other party are both on
+// the same machine, but breaks completely for anyone joining from another
+// device (e.g. a phone on the same WiFi) — "localhost" on their device
+// points back to their own device, not this dev server, so their socket
+// never connects and they silently never appear as a participant to anyone.
+const socket = io.connect(getSocketServerUrl(), {
   reconnection: true,
   reconnectionAttempts: 3,
   reconnectionDelay: 1000,
@@ -262,6 +270,18 @@ const VideoMeetingRoom = () => {
           }
         });
 
+        // The server can also silently refuse a join (e.g. "already in a
+        // meeting session from another device") by emitting 'action-error'.
+        // Previously nothing listened for this, so the room UI stayed open
+        // showing 0 participants forever with no explanation. Surface it.
+        socket.on('action-error', (message) => {
+          console.error('Room join rejected by server:', message);
+          setError(typeof message === 'string' ? message : 'Unable to join the meeting.');
+          if (localStreamRef.current) {
+            localStreamRef.current.getTracks().forEach(track => track.stop());
+          }
+        });
+
       })
       .catch(err => {
         console.error('Error accessing media devices:', err);
@@ -417,6 +437,8 @@ const VideoMeetingRoom = () => {
       socket.off('webrtc-ice-candidate');
       socket.off('new-message');
       socket.off('chat-history');
+      socket.off('duplicate-session');
+      socket.off('action-error');
     };
   }, [meeting, loading, error, isHost, meetingId, hasJoined]);
 
@@ -1142,20 +1164,20 @@ const VideoMeetingRoom = () => {
   return (
     <div className="h-screen bg-gray-900 flex flex-col overflow-hidden" style={{width: '100%', maxWidth: 'none'}}>
       {/* Header */}
-      <div className="bg-gray-800 px-6 py-3 border-b border-gray-700 flex-shrink-0">
-        <div className="flex items-center justify-between">
-          <div className="text-white">
-            <h1 className="text-lg font-semibold">{meeting?.title}</h1>
-            <p className="text-sm text-gray-400">{course?.title}</p>
+      <div className="bg-gray-800 px-3 sm:px-6 py-3 border-b border-gray-700 flex-shrink-0">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="text-white min-w-0">
+            <h1 className="text-base sm:text-lg font-semibold truncate">{meeting?.title}</h1>
+            <p className="text-sm text-gray-400 truncate">{course?.title}</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0">
             <div className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-green-500' : 'bg-red-500'}`} title={socketConnected ? 'Connected' : 'Disconnected'}></div>
             {isHost && (
               <span className="px-3 py-1 bg-purple-600 text-white text-sm rounded-full">
                 Host
               </span>
             )}
-            <span className="text-gray-400 text-sm">
+            <span className="text-gray-400 text-sm whitespace-nowrap">
               {participants.length} participant{participants.length !== 1 ? 's' : ''}
             </span>
           </div>
@@ -1218,7 +1240,7 @@ const VideoMeetingRoom = () => {
                         {/* Mirror Toggle Icon */}
                         <button
                           onClick={() => setMirrorVideo(!mirrorVideo)}
-                          className="absolute top-2 right-2 bg-black/50 hover:bg-black/70 p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                          className="absolute top-2 right-2 bg-black/50 hover:bg-black/70 p-2 rounded-full opacity-70 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity z-10"
                           title={mirrorVideo ? 'Disable mirror' : 'Enable mirror'}
                         >
                           <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1292,7 +1314,7 @@ const VideoMeetingRoom = () => {
 
         {/* Sidebar - Chat/Participants */}
         {(showChat || showParticipants) && (
-          <div className="w-80 bg-gray-800 border-l border-gray-700 flex flex-col overflow-hidden">
+          <div className="fixed sm:static inset-0 sm:inset-auto z-30 sm:z-auto w-full sm:w-80 bg-gray-800 border-l border-gray-700 flex flex-col overflow-hidden">
             {/* Sidebar Tabs */}
             <div className="flex border-b border-gray-700">
               <button
@@ -1501,7 +1523,7 @@ const VideoMeetingRoom = () => {
       </div>
 
       {/* Bottom Controls */}
-      <div className="bg-gray-800 px-6 py-4 border-t border-gray-700 relative flex-shrink-0">
+      <div className="bg-gray-800 px-2 sm:px-6 py-3 sm:py-4 border-t border-gray-700 relative flex-shrink-0 overflow-x-auto">
         {/* Reactions Panel */}
         {showReactions && (
           <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-700 rounded-lg p-3 flex gap-2 shadow-lg">
@@ -1515,7 +1537,7 @@ const VideoMeetingRoom = () => {
 
         {/* Settings Panel - Host Permissions Only */}
         {showSettings && isHost && (
-          <div className="absolute bottom-full right-6 mb-2 bg-gray-700 rounded-lg p-4 w-72 shadow-lg">
+          <div className="absolute bottom-full right-2 sm:right-6 mb-2 bg-gray-700 rounded-lg p-4 w-[calc(100vw-1rem)] max-w-72 shadow-lg">
             <h3 className="text-white font-medium mb-3">Participant Permissions</h3>
             <div className="space-y-2">
               <label className="flex items-center gap-2 text-sm text-gray-300">
@@ -1549,13 +1571,13 @@ const VideoMeetingRoom = () => {
           </div>
         )}
 
-        <div className="flex items-center justify-center gap-3 w-full">
+        <div className="flex items-center justify-start sm:justify-center gap-2 sm:gap-3 w-full min-w-max sm:min-w-0 px-1">
           {/* Microphone with Device Menu */}
           <div className="relative group">
             <button
               onClick={() => handleToggleMute()}
               disabled={!permissionsSettings.allowUnmute && !isHost && isMuted}
-              className={`p-4 rounded-full ${
+              className={`p-3 sm:p-4 rounded-full ${
                 isMuted ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-700 hover:bg-gray-600'
               } text-white transition-colors disabled:opacity-50`}
               title={isMuted ? 'Unmute' : 'Mute'}
@@ -1564,7 +1586,7 @@ const VideoMeetingRoom = () => {
             </button>
             <button
               onClick={() => setShowAudioMenu(!showAudioMenu)}
-              className="absolute -top-2 -right-2 bg-gray-600 hover:bg-gray-500 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="absolute -top-2 -right-2 bg-gray-600 hover:bg-gray-500 rounded-full p-1 opacity-70 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
               title="Select microphone"
             >
               <ChevronUp className="w-3 h-3 text-white" />
@@ -1597,7 +1619,7 @@ const VideoMeetingRoom = () => {
             <button
               onClick={handleToggleVideo}
               disabled={!permissionsSettings.allowVideo && !isHost && isVideoOff}
-              className={`p-4 rounded-full ${
+              className={`p-3 sm:p-4 rounded-full ${
                 isVideoOff ? 'bg-red-600 hover:bg-red-700' : 'bg-gray-700 hover:bg-gray-600'
               } text-white transition-colors disabled:opacity-50`}
               title={isVideoOff ? 'Turn on camera' : 'Turn off camera'}
@@ -1606,7 +1628,7 @@ const VideoMeetingRoom = () => {
             </button>
             <button
               onClick={() => setShowVideoMenu(!showVideoMenu)}
-              className="absolute -top-2 -right-2 bg-gray-600 hover:bg-gray-500 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="absolute -top-2 -right-2 bg-gray-600 hover:bg-gray-500 rounded-full p-1 opacity-70 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
               title="Select camera"
             >
               <ChevronUp className="w-3 h-3 text-white" />
@@ -1636,7 +1658,7 @@ const VideoMeetingRoom = () => {
 
           <button
             onClick={handleScreenShare}
-            className={`p-4 rounded-full ${
+            className={`p-3 sm:p-4 rounded-full ${
               isScreenSharing ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-700 hover:bg-gray-600'
             } text-white transition-colors`}
             title={isScreenSharing ? 'Stop sharing' : 'Share screen'}
@@ -1647,7 +1669,7 @@ const VideoMeetingRoom = () => {
           {/* Raise Hand */}
           <button
             onClick={handleRaiseHand}
-            className={`p-4 rounded-full ${
+            className={`p-3 sm:p-4 rounded-full ${
               raisedHands.includes(auth.currentUser?.uid) ? 'bg-yellow-500 hover:bg-yellow-600' : 'bg-gray-700 hover:bg-gray-600'
             } text-white transition-colors`}
             title={raisedHands.includes(auth.currentUser?.uid) ? 'Lower hand' : 'Raise hand'}
@@ -1658,7 +1680,7 @@ const VideoMeetingRoom = () => {
           {/* Reactions */}
           <button
             onClick={() => setShowReactions(!showReactions)}
-            className="p-4 rounded-full bg-gray-700 hover:bg-gray-600 text-white transition-colors"
+            className="p-3 sm:p-4 rounded-full bg-gray-700 hover:bg-gray-600 text-white transition-colors"
             title="Reactions"
           >
             <Smile className="w-5 h-5" />
@@ -1669,7 +1691,7 @@ const VideoMeetingRoom = () => {
               setShowChat(!showChat);
               setShowParticipants(false);
             }}
-            className="p-4 rounded-full bg-gray-700 hover:bg-gray-600 text-white transition-colors"
+            className="p-3 sm:p-4 rounded-full bg-gray-700 hover:bg-gray-600 text-white transition-colors"
             title="Chat"
           >
             <MessageSquare className="w-5 h-5" />
@@ -1680,7 +1702,7 @@ const VideoMeetingRoom = () => {
               setShowParticipants(!showParticipants);
               setShowChat(false);
             }}
-            className="p-4 rounded-full bg-gray-700 hover:bg-gray-600 text-white transition-colors"
+            className="p-3 sm:p-4 rounded-full bg-gray-700 hover:bg-gray-600 text-white transition-colors"
             title="Participants"
           >
             <Users className="w-5 h-5" />
@@ -1689,7 +1711,7 @@ const VideoMeetingRoom = () => {
           {/* Settings */}
           <button
             onClick={() => setShowSettings(!showSettings)}
-            className="p-4 rounded-full bg-gray-700 hover:bg-gray-600 text-white transition-colors"
+            className="p-3 sm:p-4 rounded-full bg-gray-700 hover:bg-gray-600 text-white transition-colors"
             title="Settings"
           >
             <Settings className="w-5 h-5" />
@@ -1698,7 +1720,7 @@ const VideoMeetingRoom = () => {
           {isHost && (
             <button
               onClick={handleEndMeeting}
-              className="px-6 py-3 rounded-full bg-red-700 hover:bg-red-800 text-white font-medium transition-colors flex items-center gap-2"
+              className="px-4 sm:px-6 py-3 rounded-full bg-red-700 whitespace-nowrap hover:bg-red-800 text-white font-medium transition-colors flex items-center gap-2"
             >
               <PhoneOff className="w-5 h-5" />
               End Meeting
@@ -1707,7 +1729,7 @@ const VideoMeetingRoom = () => {
 
           <button
             onClick={handleLeave}
-            className="px-6 py-3 rounded-full bg-red-600 hover:bg-red-700 text-white font-medium transition-colors flex items-center gap-2"
+            className="px-4 sm:px-6 py-3 rounded-full bg-red-600 whitespace-nowrap hover:bg-red-700 text-white font-medium transition-colors flex items-center gap-2"
           >
             <PhoneOff className="w-5 h-5" />
             Leave
@@ -1781,7 +1803,7 @@ const RemoteVideo = ({ participant, stream, isHost, onMute, onKick, onBlock, rea
       )}
 
       {isHost && (
-        <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="absolute top-2 left-2 opacity-70 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
           <div className="relative">
             <button
               onClick={() => setShowMenu(!showMenu)}
