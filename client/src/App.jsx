@@ -4,6 +4,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "./firebase";
 import LoadingSpinner from "./components/LoadingSpinner";
 import ErrorBoundary from "./components/ErrorBoundary";
+import BottomNav from "./components/BottomNav";
 import { HelmetProvider } from 'react-helmet-async';
 
 // Critical pages - loaded immediately (above the fold)
@@ -91,6 +92,7 @@ function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
+        <BottomNav user={user} />
       </Router>
     </ErrorBoundary>
     </HelmetProvider>

@@ -496,34 +496,6 @@ const SocialHomePage = () => {
                   <PlusCircle className="w-5 h-5" />
                   <span>Create</span>
                 </button>
-                <button
-                  onClick={() => {
-                    const go = () => navigate(`/profile`);
-                    if (typeof document !== 'undefined' && 'startViewTransition' in document) {
-                      // eslint-disable-next-line no-undef
-                      document.startViewTransition(go);
-                    } else {
-                      go();
-                    }
-                  }}
-                  className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl ring-2 ring-sky-400/40 hover:ring-sky-300 transition-all overflow-hidden hover:scale-105 shadow-md shadow-black/40"
-                >
-                  {userProfile?.profilePic ? (
-                    <img
-                      src={userProfile.profilePic}
-                      alt="Profile"
-                      className="w-full h-full object-cover"
-                      style={{ viewTransitionName: 'profile-avatar' }}
-                    />
-                  ) : (
-                  <div
-                    className="w-full h-full bg-gradient-to-br from-sky-400 via-blue-500 to-cyan-500 flex items-center justify-center"
-                    style={{ viewTransitionName: 'profile-avatar' }}
-                  >
-                      <User className="w-6 h-6 text-white" />
-                    </div>
-                  )}
-                </button>
               </div>
             </div>
 
@@ -692,17 +664,18 @@ const SocialHomePage = () => {
                   </p>
                 </div>
               ) : activeTab === 'explore' ? (
-                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-1.5 sm:gap-2">
+                <div className="columns-2 sm:columns-3 md:columns-4 lg:columns-5 gap-1.5 sm:gap-2 [column-fill:_balance]">
                   {feed.filter(post => post.imageUrl).map((post, index) => (
                     <div
                       key={post.id}
-                      className="relative group cursor-pointer overflow-hidden aspect-square bg-zinc-900 rounded-xl"
+                      className="relative group cursor-pointer overflow-hidden bg-zinc-900 rounded-xl mb-1.5 sm:mb-2 break-inside-avoid"
                       onClick={() => openPostModal(post, index, feed.filter(p => p.imageUrl))}
                     >
                       <img
                         src={post.imageUrl}
                         alt="Post"
-                        className="w-full h-full object-cover group-hover:brightness-75 transition-all duration-300"
+                        loading="lazy"
+                        className="w-full h-auto object-cover group-hover:brightness-75 transition-all duration-300"
                       />
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
                         <div className="text-white flex items-center gap-6 text-base font-semibold">
@@ -877,8 +850,8 @@ const SocialHomePage = () => {
             </aside>
           </div>
 
-          {/* Bottom padding for mobile navigation */}
-          <div className="pb-20 sm:pb-0"></div>
+          {/* Bottom padding so the floating nav never covers content */}
+          <div className="pb-24"></div>
         </div>
 
         {/* Create Post Modal - Premium */}
@@ -1582,43 +1555,6 @@ const SocialHomePage = () => {
             </div>
           )
         }
-
-        {/* Bottom Navigation - Mobile Only */}
-        <div className="fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-2xl border-t border-slate-700 z-50 sm:hidden shadow-lg shadow-black/50">
-          <div className="flex justify-around py-3 px-2">
-            <button
-              onClick={() => navigate('/home')}
-              className="flex flex-col items-center gap-1 p-2 text-sky-300"
-            >
-              <div className="relative">
-                <Home className="w-6 h-6" />
-                <div className="absolute -bottom-1 left-0 right-0 h-1 bg-gradient-to-r from-sky-500 via-blue-500 to-cyan-500 rounded-full"></div>
-              </div>
-              <span className="text-xs font-semibold">Home</span>
-            </button>
-            <button
-              onClick={() => navigate('/users')}
-              className="flex flex-col items-center gap-1 p-2 text-slate-400 hover:text-sky-300 transition-colors"
-            >
-              <Users className="w-6 h-6" />
-              <span className="text-xs font-medium">People</span>
-            </button>
-            <button
-              onClick={() => navigate('/courses')}
-              className="flex flex-col items-center gap-1 p-2 text-slate-400 hover:text-sky-300 transition-colors"
-            >
-              <BookOpen className="w-6 h-6" />
-              <span className="text-xs font-medium">Courses</span>
-            </button>
-            <button
-              onClick={() => navigate('/original-home')}
-              className="flex flex-col items-center gap-1 p-2 text-slate-400 hover:text-sky-300 transition-colors"
-            >
-              <Mic className="w-6 h-6" />
-              <span className="text-xs font-medium">Play</span>
-            </button>
-          </div>
-        </div>
       </div >
     </>
   );
