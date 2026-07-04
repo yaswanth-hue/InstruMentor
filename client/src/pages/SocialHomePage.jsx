@@ -34,7 +34,6 @@ import {
   X
 } from 'lucide-react';
 import StoriesBar from '../components/social/StoriesBar';
-import QuickAccessPanel from '../components/social/QuickAccessPanel';
 import TrendingPanel from '../components/social/TrendingPanel';
 
 // Import instrument images and logo
@@ -79,7 +78,6 @@ const SocialHomePage = () => {
   const [commentText, setCommentText] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
   const [selectedPostModal, setSelectedPostModal] = useState(null);
-  const [showQuickAccess, setShowQuickAccess] = useState(false);
   const [showTrending, setShowTrending] = useState(false);
   const [hasUnseenMessages, setHasUnseenMessages] = useState(false);
   const [postMediaType, setPostMediaType] = useState('post'); // post, reel, video
@@ -528,22 +526,11 @@ const SocialHomePage = () => {
 
         {/* Mobile-only slide panels */}
         <div className="lg:hidden">
-          <QuickAccessPanel show={showQuickAccess} onClose={() => setShowQuickAccess(false)} />
-
           <TrendingPanel
             show={showTrending}
             onClose={() => setShowTrending(false)}
             trendingHashtags={trendingHashtags}
           />
-
-          {!showQuickAccess && activeTab !== 'explore' && (
-            <button
-              onClick={() => setShowQuickAccess(true)}
-              className="fixed left-2 sm:left-3 top-[calc(50%+36px)] -translate-y-1/2 bg-zinc-950/80 backdrop-blur-2xl text-white p-3 rounded-2xl border border-white/10 shadow-xl shadow-black/40 hover:bg-white/5 transition-colors z-30"
-            >
-              <ChevronRight className="w-6 h-6 text-sky-300" />
-            </button>
-          )}
 
           {!showTrending && activeTab !== 'explore' && (
             <button
