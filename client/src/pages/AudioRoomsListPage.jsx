@@ -5,12 +5,11 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../firebase';
 import { io } from 'socket.io-client';
 import {
-  Lock, Users, MessageSquare, Image, Plus, Home, Clock,
+  Lock, Users, MessageSquare, Image, Plus, ArrowLeft, Clock,
   AlertCircle, Wifi, WifiOff, Radio, Mic
 } from 'lucide-react';
 import CreateRoomModal from '../components/CreateRoomModal';
 import PasswordModal from '../components/PasswordModal';
-import LoadingSpinner from '../components/LoadingSpinner';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_SERVER_URL || 'http://localhost:3001';
 
@@ -102,10 +101,6 @@ const AudioRoomsListPage = () => {
     navigate(`/audio-room/${newRoom.id}`, { state: { isHost: true } });
   };
 
-  if (loading) {
-    return <LoadingSpinner message="Loading rooms…" />;
-  }
-
   return (
     <>
       <Helmet>
@@ -124,6 +119,13 @@ const AudioRoomsListPage = () => {
             <div className="flex items-center justify-between gap-4 flex-wrap">
 
               <div className="flex items-center gap-3">
+                <button
+                  onClick={() => navigate(-1)}
+                  aria-label="Go back"
+                  className="h-10 w-10 shrink-0 flex items-center justify-center rounded-2xl border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-200 transition-colors"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
                 <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-sky-600 via-blue-600 to-cyan-600 flex items-center justify-center shadow-lg shadow-sky-900/40 shrink-0">
                   <Radio className="w-5 h-5 text-white" />
                 </div>
@@ -141,13 +143,6 @@ const AudioRoomsListPage = () => {
               </div>
 
               <div className="flex gap-2">
-                <button
-                  onClick={() => navigate('/home')}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 hover:bg-slate-800 px-3 py-2 text-sm font-semibold text-slate-200 transition-colors"
-                >
-                  <Home className="w-4 h-4" />
-                  <span className="hidden sm:inline">Home</span>
-                </button>
                 <button
                   onClick={() => { if (!user) { navigate('/login'); return; } setShowCreateModal(true); }}
                   className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-sky-600 via-blue-600 to-cyan-600 hover:from-sky-500 hover:via-blue-500 hover:to-cyan-500 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-sky-900/30 transition-all duration-200"
@@ -176,7 +171,7 @@ const AudioRoomsListPage = () => {
           )}
 
           {/* Empty state */}
-          {audioRooms.length === 0 && !error && (
+          {!loading && audioRooms.length === 0 && !error && (
             <div className="flex flex-col items-center justify-center rounded-3xl border border-sky-300/20 bg-slate-900/80 backdrop-blur-xl p-12 text-center shadow-2xl shadow-black/40 mt-8">
               <div className="w-20 h-20 rounded-3xl bg-slate-800 border border-sky-400/20 flex items-center justify-center mb-5 shadow-lg shadow-black/40">
                 <Radio className="w-10 h-10 text-sky-300" />
@@ -193,8 +188,29 @@ const AudioRoomsListPage = () => {
             </div>
           )}
 
+          {/* Loading skeleton */}
+          {loading && (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="rounded-3xl border border-sky-300/20 bg-slate-900/80 backdrop-blur-xl overflow-hidden"
+                >
+                  <div className="h-1 w-full bg-white/10" />
+                  <div className="p-5">
+                    <div className="h-4 w-2/3 rounded bg-white/10 animate-pulse" />
+                    <div className="mt-2 h-3 w-1/3 rounded bg-white/10 animate-pulse" />
+                    <div className="mt-4 h-3 w-full rounded bg-white/5 animate-pulse" />
+                    <div className="mt-1.5 h-3 w-4/5 rounded bg-white/5 animate-pulse" />
+                    <div className="mt-5 h-10 rounded-2xl bg-white/10 animate-pulse" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Grid */}
-          {audioRooms.length > 0 && (
+          {!loading && audioRooms.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {audioRooms.map((room, idx) => {
                 const liveCount = participantCounts[room.id] ?? 0;

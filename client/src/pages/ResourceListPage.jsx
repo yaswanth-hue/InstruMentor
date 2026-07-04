@@ -156,7 +156,7 @@ const ResourceListPage = () => {
       : resources.filter((r) => r.resourceType === filterType);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100 p-8 font-sans" style={{width: '100%', maxWidth: 'none'}}>
+    <div className="min-h-screen bg-gradient-to-br from-pink-100 via-purple-100 to-blue-100 p-4 sm:p-8 font-sans" style={{width: '100%', maxWidth: 'none'}}>
       <div className="mb-6 w-fit">
         <Link to="/" className="inline-block">
           <LogoWithText />
@@ -164,11 +164,11 @@ const ResourceListPage = () => {
       </div>
 
       <div className="text-center mb-10">
-        <h2 className="text-4xl font-bold text-purple-700 drop-shadow-md mb-2">
+        <h2 className="text-2xl sm:text-4xl font-bold text-purple-700 drop-shadow-md mb-2">
           {instrument.charAt(0).toUpperCase() + instrument.slice(1)} —{" "}
           {level.charAt(0).toUpperCase() + level.slice(1)}
         </h2>
-        <p className="text-lg text-gray-700">Pick your vibe and dive in 🎶</p>
+        <p className="text-base sm:text-lg text-gray-700">Pick your vibe and dive in 🎶</p>
       </div>
 
       <div className="mb-6 flex justify-center">

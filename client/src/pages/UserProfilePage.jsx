@@ -48,6 +48,28 @@ import LazyImage from '../components/LazyImage';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 
+// Cache of already-loaded profile data, keyed by profile user id. Lets a
+// revisit within the same session render instantly from cache while a
+// fresh copy is quietly fetched in the background, instead of blanking the
+// page out and showing the loading state again every single time.
+const profileDataCache = new Map();
+
+const ProfileHeaderSkeleton = () => (
+  <div className="w-full animate-pulse">
+    <div className="mx-auto mb-3 h-8 w-48 rounded-xl bg-white/10" />
+    <div className="mx-auto mb-6 h-4 w-64 rounded-lg bg-white/5" />
+    <div className="mb-6 grid w-full grid-cols-3 gap-3">
+      <div className="h-16 rounded-2xl border border-slate-700 bg-white/5" />
+      <div className="h-16 rounded-2xl border border-slate-700 bg-white/5" />
+      <div className="h-16 rounded-2xl border border-slate-700 bg-white/5" />
+    </div>
+    <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="h-28 rounded-2xl border border-slate-700 bg-white/5" />
+      <div className="h-28 rounded-2xl border border-slate-700 bg-white/5" />
+    </div>
+  </div>
+);
+
 const ProfilePage = () => {
   const { userId } = useParams();
   const navigate = useNavigate();
@@ -208,7 +230,20 @@ const ProfilePage = () => {
   const loadProfileData = async (signal) => {
     if (!profileUserId) return;
 
-    setLoading(true);
+    const cached = profileDataCache.get(profileUserId);
+    if (cached) {
+      // We've seen this profile before this session — show it immediately
+      // instead of blanking the page, then quietly refresh below.
+      setUserProfile(cached.profile);
+      setPosts(cached.posts);
+      setTaggedPosts(cached.taggedPosts);
+      setCreatedCourses(cached.createdCourses);
+      setEnrolledCourses(cached.enrolledCourses);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+
     try {
       // Load user profile
       let profile = await getUserProfile(profileUserId);
@@ -250,15 +285,24 @@ const ProfilePage = () => {
 
         if (signal?.aborted) return;
 
-        setPosts((userPosts || []).filter(post => post.imageUrl || post.mediaUrl));
-        setTaggedPosts(
-          (allPosts || []).filter((post) => {
-            const tags = post.taggedUsers || [];
-            return Array.isArray(tags) && tags.includes(profileUserId) && post.userId !== profileUserId;
-          })
-        );
+        const filteredPosts = (userPosts || []).filter(post => post.imageUrl || post.mediaUrl);
+        const filteredTaggedPosts = (allPosts || []).filter((post) => {
+          const tags = post.taggedUsers || [];
+          return Array.isArray(tags) && tags.includes(profileUserId) && post.userId !== profileUserId;
+        });
+
+        setPosts(filteredPosts);
+        setTaggedPosts(filteredTaggedPosts);
         setCreatedCourses(created || []);
         setEnrolledCourses(enrolled || []);
+
+        profileDataCache.set(profileUserId, {
+          profile: profile || defaultProfile,
+          posts: filteredPosts,
+          taggedPosts: filteredTaggedPosts,
+          createdCourses: created || [],
+          enrolledCourses: enrolled || [],
+        });
       } else {
         // Private account - clear content
         if (!signal?.aborted) {
@@ -267,6 +311,14 @@ const ProfilePage = () => {
           setCreatedCourses([]);
           setEnrolledCourses([]);
         }
+
+        profileDataCache.set(profileUserId, {
+          profile: profile || defaultProfile,
+          posts: [],
+          taggedPosts: [],
+          createdCourses: [],
+          enrolledCourses: [],
+        });
       }
     } catch (error) {
       if (error.name !== 'AbortError') {
@@ -744,11 +796,10 @@ const ProfilePage = () => {
               ref={profileContentRef}
             >
               <div className="rounded-3xl border border-white/10 bg-zinc-900/60 backdrop-blur-2xl shadow-2xl shadow-black/40 p-6">
-                {/* When data is still loading, show content skeleton here (no full-screen loader) */}
-                {loading && (
-                  <LoadingSpinner fullScreen={false} size="sm" message="Loading profile…" />
-                )}
-
+                {loading ? (
+                  <ProfileHeaderSkeleton />
+                ) : (
+                  <>
             {/* User Name */}
             {isEditingName && isOwnProfile ? (
               <div className="flex items-center justify-center gap-2 mb-3">
@@ -956,6 +1007,8 @@ const ProfilePage = () => {
                 </button>
               </div>
             )}
+                  </>
+                )}
               </div>
             </section>
           </div>

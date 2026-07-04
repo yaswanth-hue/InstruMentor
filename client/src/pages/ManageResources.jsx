@@ -106,11 +106,11 @@ const ManageResources = () => {
   };
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       <h1 className="text-3xl font-bold mb-6">Manage Resources</h1>
 
       {/* Filters */}
-      <div className="mb-6 flex gap-4">
+      <div className="mb-6 flex flex-wrap gap-4">
         <select
           value={selectedInstrument}
           onChange={e => {
@@ -147,10 +147,10 @@ const ManageResources = () => {
           {filteredResources.map(res => (
             <div
               key={res.id}
-              className="p-4 border rounded flex justify-between items-start"
+              className="p-4 border rounded flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3"
             >
-              <div>
-                <p className="font-semibold text-lg">{res.title}</p>
+              <div className="min-w-0">
+                <p className="font-semibold text-lg break-words">{res.title}</p>
                 <p className="text-sm text-gray-600 mb-1">
                   {res.instrument} • {res.level} • {res.resourceType}
                 </p>
@@ -158,12 +158,12 @@ const ManageResources = () => {
                   href={res.link}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-blue-600 underline"
+                  className="text-blue-600 underline break-all"
                 >
                   {res.link}
                 </a>
               </div>
-              <div className="space-x-2">
+              <div className="flex flex-wrap gap-2 sm:shrink-0">
                 <button
                   onClick={() => handleEditClick(res)}
                   className="px-3 py-1 bg-yellow-500 text-white rounded"

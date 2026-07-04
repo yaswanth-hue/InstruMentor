@@ -243,9 +243,9 @@ const PostDetailPage = () => {
       </header>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Left Side - Image */}
-        <div className="flex-1 bg-black flex items-center justify-center overflow-hidden">
+        <div className="flex-shrink-0 h-[38vh] md:h-auto md:flex-1 bg-black flex items-center justify-center overflow-hidden">
           {post.imageUrl ? (
             <img
               src={post.imageUrl}
@@ -260,7 +260,7 @@ const PostDetailPage = () => {
         </div>
 
         {/* Right Side - Post Details */}
-        <div className="w-full md:w-[420px] flex flex-col bg-white border-l border-gray-200">
+        <div className="w-full md:w-[420px] flex-1 md:flex-none min-h-0 flex flex-col bg-white border-l border-gray-200">
           {/* Header with User Info */}
           <div className="px-4 py-3 border-b border-gray-100 bg-white flex-shrink-0">
             <div

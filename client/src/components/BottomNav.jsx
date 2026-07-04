@@ -1,15 +1,21 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Users, BookOpen, Mic, User } from 'lucide-react';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { Users, BookOpen, Home, Mic, User } from 'lucide-react';
+import { db } from '../firebase';
 
-// Icon-only, in this exact order. Order matters — it's what the sliding
-// indicator below walks across.
+// Icon-only, in this exact order — Home sits in the middle and is the
+// default/landing tab. Order matters, it's what the sliding indicator
+// below walks across.
 const NAV_ITEMS = [
   { path: '/users', icon: Users, label: 'Discover musicians' },
   { path: '/courses', icon: BookOpen, label: 'Browse courses' },
+  { path: '/home', icon: Home, label: 'Home', isDefault: true },
   { path: '/audio-rooms', icon: Mic, label: 'Join audio rooms' },
   { path: '/profile', icon: User, label: 'Profile' },
 ];
+
+const DEFAULT_INDEX = NAV_ITEMS.findIndex((item) => item.isDefault);
 
 // This floating nav must never appear inside a live audio room or a live
 // meeting room — those screens need the full viewport and already have
@@ -31,11 +37,26 @@ const STEP = ITEM_SIZE + ITEM_GAP;
 const BottomNav = ({ user }) => {
   const location = useLocation();
   const navigate = useNavigate();
+  const [profilePic, setProfilePic] = useState(null);
+
+  useEffect(() => {
+    if (!user) {
+      setProfilePic(null);
+      return;
+    }
+    // Live-subscribe so the avatar updates the moment the user changes
+    // their profile picture, without needing a page reload.
+    const unsubscribe = onSnapshot(doc(db, 'users', user.uid), (snap) => {
+      setProfilePic(snap.exists() ? snap.data()?.profilePic || null : null);
+    });
+    return () => unsubscribe();
+  }, [user]);
 
   if (!user) return null;
   if (HIDDEN_ROUTE_PATTERNS.some((pattern) => pattern.test(location.pathname))) return null;
 
-  const activeIndex = NAV_ITEMS.findIndex((item) => location.pathname.startsWith(item.path));
+  const matchedIndex = NAV_ITEMS.findIndex((item) => location.pathname.startsWith(item.path));
+  const activeIndex = matchedIndex !== -1 ? matchedIndex : DEFAULT_INDEX;
 
   return (
     <nav
@@ -44,16 +65,16 @@ const BottomNav = ({ user }) => {
     >
       <div className="relative flex items-center gap-2 p-2 rounded-full bg-white/10 backdrop-blur-2xl border border-white/20 shadow-2xl shadow-black/40">
         {/* Sliding active indicator */}
-        {activeIndex !== -1 && (
-          <div
-            className="absolute top-2 left-2 w-12 h-12 rounded-full bg-white shadow-lg shadow-black/30 transition-transform duration-300 ease-out pointer-events-none"
-            style={{ transform: `translateX(${activeIndex * STEP}px)` }}
-          />
-        )}
+        <div
+          className="absolute top-2 left-2 w-12 h-12 rounded-full bg-white shadow-lg shadow-black/30 transition-transform duration-300 ease-out pointer-events-none"
+          style={{ transform: `translateX(${activeIndex * STEP}px)` }}
+        />
 
         {NAV_ITEMS.map((item, index) => {
           const Icon = item.icon;
           const isActive = index === activeIndex;
+          const isProfile = item.path === '/profile';
+
           return (
             <button
               key={item.path}
@@ -64,11 +85,25 @@ const BottomNav = ({ user }) => {
               aria-current={isActive ? 'page' : undefined}
               className="relative z-10 w-12 h-12 rounded-full flex items-center justify-center transition-colors duration-300"
             >
-              <Icon
-                className={`w-5 h-5 transition-colors duration-300 ${
-                  isActive ? 'text-slate-900' : 'text-white/70 hover:text-white'
-                }`}
-              />
+              {isProfile && profilePic ? (
+                <span
+                  className={`block w-7 h-7 rounded-full overflow-hidden ring-2 transition-all duration-300 ${
+                    isActive ? 'ring-slate-900/70' : 'ring-white/40'
+                  }`}
+                >
+                  <img
+                    src={profilePic}
+                    alt="Profile"
+                    className="w-full h-full object-cover"
+                  />
+                </span>
+              ) : (
+                <Icon
+                  className={`w-5 h-5 transition-colors duration-300 ${
+                    isActive ? 'text-slate-900' : 'text-white/70 hover:text-white'
+                  }`}
+                />
+              )}
             </button>
           );
         })}

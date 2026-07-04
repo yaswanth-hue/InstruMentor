@@ -19,8 +19,6 @@ import {
 import {
   Mail,
   PlusCircle,
-  Home,
-  BookOpen,
   User,
   Users,
   Sparkles,
@@ -32,7 +30,6 @@ import {
   MessageCircle,
   Share2,
   Image,
-  Mic,
   Send,
   X
 } from 'lucide-react';
@@ -561,56 +558,8 @@ const SocialHomePage = () => {
         {/* Main Content Area */}
         <div className="w-full px-3 sm:px-4 lg:px-6 py-6 sm:py-8" style={{ width: '100%', maxWidth: 'none' }}>
           <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Left Sidebar (desktop) */}
-            <aside className="hidden lg:block lg:col-span-3">
-              <div className="sticky top-[92px] space-y-4">
-                <div className="rounded-3xl border border-slate-700 bg-zinc-900/70 backdrop-blur-2xl shadow-xl shadow-black/40 p-5">
-                  <div className="flex items-center gap-3">
-                    <div className="h-11 w-11 rounded-2xl overflow-hidden border border-white/10 bg-zinc-900">
-                      <img src={logoImg} alt="InstruMentor" className="h-full w-full object-cover" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-zinc-100 truncate">Navigation</p>
-                      <p className="text-xs text-zinc-400 truncate">Quick access</p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid gap-2">
-                    <button
-                      onClick={() => navigate('/users')}
-                      className="w-full flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-900 hover:bg-slate-800 px-4 py-3 text-sm font-semibold text-zinc-100 transition-colors"
-                    >
-                      <Users className="h-5 w-5 text-sky-300" />
-                      Discover musicians
-                    </button>
-                    <button
-                      onClick={() => navigate('/courses')}
-                      className="w-full flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-900 hover:bg-slate-800 px-4 py-3 text-sm font-semibold text-zinc-100 transition-colors"
-                    >
-                      <BookOpen className="h-5 w-5 text-sky-300" />
-                      Browse courses
-                    </button>
-                    <button
-                      onClick={() => navigate('/audio-rooms')}
-                      className="w-full flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-900 hover:bg-slate-800 px-4 py-3 text-sm font-semibold text-zinc-100 transition-colors"
-                    >
-                      <Mic className="h-5 w-5 text-sky-300" />
-                      Join audio rooms
-                    </button>
-                    <button
-                      onClick={() => navigate('/original-home')}
-                      className="w-full flex items-center gap-3 rounded-2xl border border-slate-700 bg-slate-900 hover:bg-slate-800 px-4 py-3 text-sm font-semibold text-zinc-100 transition-colors"
-                    >
-                      <Home className="h-5 w-5 text-sky-300" />
-                      Virtual instruments
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </aside>
-
             {/* Center Column */}
-            <section className="lg:col-span-6">
+            <section className="lg:col-span-9">
               {activeTab !== 'explore' && (
                 <div className="mb-6 rounded-3xl overflow-hidden border border-slate-700 bg-zinc-900/55 backdrop-blur-2xl shadow-xl shadow-black/30">
                   <StoriesBar

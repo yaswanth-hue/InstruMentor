@@ -274,7 +274,7 @@ const MessagesPage = () => {
         <main className="w-full px-4 sm:px-6 py-5" style={{ width: '100%', maxWidth: 'none' }}>
           <div className="mx-auto max-w-7xl grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 min-h-[calc(100vh-180px)]">
             {/* Threads */}
-            <aside className="lg:col-span-4 xl:col-span-4">
+            <aside className={`${activeChat ? 'hidden lg:block' : 'block'} lg:col-span-4 xl:col-span-4`}>
               <div className="rounded-3xl border border-slate-800 bg-slate-900/70 backdrop-blur-xl shadow-2xl shadow-black/30 overflow-hidden">
                 <div className="p-4 border-b border-slate-800">
                   <div className="relative">
@@ -378,7 +378,7 @@ const MessagesPage = () => {
             </aside>
 
             {/* Chat */}
-            <section className={showSocialPanel ? 'lg:col-span-5 xl:col-span-5' : 'lg:col-span-8 xl:col-span-8'}>
+            <section className={`${activeChat ? 'block' : 'hidden lg:block'} ${showSocialPanel ? 'lg:col-span-5 xl:col-span-5' : 'lg:col-span-8 xl:col-span-8'}`}>
               <div className="rounded-3xl border border-slate-800 bg-slate-900/70 backdrop-blur-xl shadow-2xl shadow-black/30 overflow-hidden flex flex-col min-h-[520px]">
                 {!activeChat ? (
                   <div className="flex-1 flex items-center justify-center p-10 text-center">
@@ -393,6 +393,14 @@ const MessagesPage = () => {
                     {/* Chat header */}
                     <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => setActiveChat(null)}
+                          className="lg:hidden shrink-0 p-2 -ml-2 rounded-xl text-slate-300 hover:bg-slate-800 transition-colors"
+                          aria-label="Back to conversations"
+                        >
+                          <ArrowLeft className="h-5 w-5" />
+                        </button>
                         {activeChat.userInfo?.profilePic ? (
                           <img
                             src={activeChat.userInfo.profilePic}
