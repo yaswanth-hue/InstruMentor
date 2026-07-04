@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* Display face used on the marketing/landing pages only — pairs with the
+   default sans body face. "Instrument Serif" doubles as a small nod to the
+   InstruMentor name. */
+.font-display {
+  font-family: "Instrument Serif", ui-serif, Georgia, serif;
+}
+
 /* Premium profile transitions (View Transitions API) */
 ::view-transition-old(profile-avatar),
 ::view-transition-new(profile-avatar) {

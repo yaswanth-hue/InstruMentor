@@ -8,7 +8,7 @@ import BottomNav from "./components/BottomNav";
 import { HelmetProvider } from 'react-helmet-async';
 
 // Critical pages - loaded immediately (above the fold)
-import LandingPage from "./pages/LandingPage";
+import LandingPageReveal from "./pages/LandingPageReveal";
 import LoginPage from "./pages/LoginPage";
 import SignUp from "./pages/SignUp";
 import SocialHomePage from "./pages/SocialHomePage";
@@ -55,7 +55,7 @@ function App() {
           <Suspense fallback={<LoadingSpinner />}>
             <Routes>
             {/* Root route */}
-            <Route path="/" element={!user ? <LandingPage /> : <Navigate to="/home" />} />
+            <Route path="/" element={!user ? <LandingPageReveal /> : <Navigate to="/home" />} />
 
             {/* Public routes */}
             <Route path="/login" element={!user ? <LoginPage /> : <Navigate to="/home" />} />

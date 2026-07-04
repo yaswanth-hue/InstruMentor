@@ -323,6 +323,7 @@ const sendMessageRequest = async (messageData) => {
     const docRef = await addDoc(collection(db, "messages"), {
       ...messageData,
       status: hasAccepted ? "accepted" : "pending",
+      read: false,
       timestamp: serverTimestamp(),
     });
     return docRef.id;
@@ -330,10 +331,23 @@ const sendMessageRequest = async (messageData) => {
     const docRef = await addDoc(collection(db, "messages"), {
       ...messageData,
       status: "pending",
+      read: false,
       timestamp: serverTimestamp(),
     });
     return docRef.id;
   }
+};
+
+// Marks a batch of message docs as read. Pass the ids of the *unread*
+// messages you already have loaded client-side to avoid an extra query.
+const markMessagesRead = async (messageIds) => {
+  const ids = (messageIds || []).filter(Boolean);
+  if (ids.length === 0) return;
+  const batch = writeBatch(db);
+  ids.forEach((id) => {
+    batch.update(doc(db, "messages", id), { read: true });
+  });
+  await batch.commit();
 };
 
 const acceptMessageRequest = async (messageId) => {
@@ -707,6 +721,7 @@ export {
   getFeedPosts,
   resolveTaggedUsersByMentions,
   sendMessageRequest,
+  markMessagesRead,
   acceptMessageRequest,
   rejectMessageRequest,
   getMessages,

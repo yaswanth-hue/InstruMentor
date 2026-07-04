@@ -98,7 +98,7 @@ const ProfilePage = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("media"); // media, courses
   const [courseSubTab, setCourseSubTab] = useState("created"); // created or enrolled
-  const [mediaTab, setMediaTab] = useState("posts"); // posts, reels, tagged
+  const [mediaTab, setMediaTab] = useState("posts"); // posts, vibes, tagged
 
   // Profile editing states
   const [uploading, setUploading] = useState(false);
@@ -952,7 +952,7 @@ const ProfilePage = () => {
                   </div>
                   <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-2">
                     <p className="text-lg font-bold text-slate-100">{reelPosts.length}</p>
-                    <p className="text-[11px] text-slate-400">Reels</p>
+                    <p className="text-[11px] text-slate-400">Vibes</p>
                   </div>
                   <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-2">
                     <p className="text-lg font-bold text-slate-100">{taggedPosts.length}</p>
@@ -1000,7 +1000,16 @@ const ProfilePage = () => {
                   </button>
                 )}
                 <button
-                  onClick={() => navigate('/messages')}
+                  onClick={() =>
+                    navigate('/messages', {
+                      state: {
+                        startChatWith: {
+                          userId: profileUserId,
+                          userInfo: userProfile,
+                        },
+                      },
+                    })
+                  }
                   className="rounded-2xl border border-slate-600 bg-slate-900 px-5 py-2.5 text-sm font-semibold text-slate-100 hover:bg-slate-800"
                 >
                   Message
@@ -1059,12 +1068,12 @@ const ProfilePage = () => {
               Posts
             </button>
             <button
-              onClick={() => setMediaTab('reels')}
+              onClick={() => setMediaTab('vibes')}
               className={`flex-1 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
-                mediaTab === 'reels' ? 'bg-slate-800 text-sky-300' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+                mediaTab === 'vibes' ? 'bg-slate-800 text-sky-300' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
               }`}
             >
-              Reels
+              Vibes
             </button>
             <button
               onClick={() => setMediaTab('tagged')}
@@ -1207,8 +1216,8 @@ const ProfilePage = () => {
           </div>
         )}
 
-        {/* Reels Tab */}
-        {activeTab === "media" && mediaTab === "reels" && (
+        {/* Vibes Tab */}
+        {activeTab === "media" && mediaTab === "vibes" && (
           <div>
             {(() => {
               const isPrivateAccount = userProfile?.isPrivate === true;
@@ -1220,13 +1229,13 @@ const ProfilePage = () => {
                       <User className="h-12 w-12 text-slate-400" />
                     </div>
                     <h3 className="mb-3 text-3xl font-bold text-slate-100">This Account is Private</h3>
-                    <p className="mb-8 text-lg text-slate-400">Follow this account to see their reels.</p>
+                    <p className="mb-8 text-lg text-slate-400">Follow this account to see their vibes.</p>
                     <button
                       onClick={handleFollow}
                       className="mx-auto inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-8 py-4 font-bold text-white hover:bg-sky-500"
                     >
                       <UserPlus className="w-5 h-5" />
-                      Follow to View Reels
+                      Follow to View Vibes
                     </button>
                   </div>
                 );
@@ -1235,7 +1244,7 @@ const ProfilePage = () => {
               const reelPostsLocal = reelPosts;
 
               if (loading) {
-                return <LoadingSpinner fullScreen={false} size="sm" message="Loading reels…" />;
+                return <LoadingSpinner fullScreen={false} size="sm" message="Loading vibes…" />;
               }
 
               if (reelPostsLocal.length === 0) {
@@ -1245,10 +1254,10 @@ const ProfilePage = () => {
                       <Film className="w-10 h-10 text-slate-300" />
                     </div>
                     <h3 className="mb-3 text-2xl font-bold text-slate-100">
-                      {isOwnProfile ? "You haven't posted reels yet" : "No reels yet"}
+                      {isOwnProfile ? "You haven't posted vibes yet" : "No vibes yet"}
                     </h3>
                     <p className="mb-8 text-slate-400">
-                      {isOwnProfile ? "Share a vibe to appear here." : "This user has not shared reels yet."}
+                      {isOwnProfile ? "Share a vibe to appear here." : "This user has not shared vibes yet."}
                     </p>
                     {isOwnProfile && (
                       <button
