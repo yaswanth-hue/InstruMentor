@@ -107,6 +107,18 @@ export const registerRoomHandlers = (io, socket) => {
         }
     });
 
+    socket.on('toggle-video', async ({ roomId, userId, hasVideo }) => {
+        const participants = await stateService.getParticipants(roomId);
+        const participant = participants.find(p => p.userId === userId);
+
+        if (participant) {
+            participant.hasVideo = hasVideo;
+            await stateService.addParticipant(roomId, participant);
+            io.to(roomId).emit('participant-video-toggled', { userId, hasVideo });
+            io.to(roomId).emit('participants-updated', participants);
+        }
+    });
+
     socket.on('raise-hand', async ({ roomId, userId, raised }) => {
         const participants = await stateService.getParticipants(roomId);
         const participant = participants.find(p => p.userId === userId);

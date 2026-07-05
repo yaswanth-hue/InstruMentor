@@ -342,6 +342,20 @@ const rejectMessageRequest = async (messageId) => {
   });
 };
 
+// Marks a batch of message docs (by id) as read. Used when the receiver
+// opens a conversation, for messages that were sent to them and aren't
+// marked read yet — see MessagesPage's getUnreadMessageIds/tryMarkRead.
+const markMessagesRead = async (messageIds) => {
+  const ids = (messageIds || []).filter(Boolean);
+  if (ids.length === 0) return;
+
+  const batch = writeBatch(db);
+  ids.forEach((id) => {
+    batch.update(doc(db, "messages", id), { read: true });
+  });
+  await batch.commit();
+};
+
 const getMessages = async (userId) => {
   const q = query(
     collection(db, "messages"),
@@ -701,6 +715,7 @@ export {
   sendMessageRequest,
   acceptMessageRequest,
   rejectMessageRequest,
+  markMessagesRead,
   getMessages,
   createCourse,
   enrollInCourse,
