@@ -1,7 +1,7 @@
 import React from 'react';
 import { TrendingUp, X, Hash } from 'lucide-react';
 
-const TrendingPanel = ({ show, onClose, trendingHashtags }) => {
+const TrendingPanel = ({ show, onClose, trendingHashtags, onSelectHashtag }) => {
     if (!show) return null;
 
     return (
@@ -33,7 +33,11 @@ const TrendingPanel = ({ show, onClose, trendingHashtags }) => {
                         {trendingHashtags.length > 0 ? (
                             trendingHashtags.map((item, index) => {
                                 return (
-                                    <div key={item.tag} className="p-5 bg-slate-800/70 rounded-2xl border border-slate-700 hover:bg-slate-800 transition-all cursor-pointer group">
+                                    <div
+                                    key={item.tag}
+                                    onClick={() => onSelectHashtag?.(item.tag)}
+                                    className="p-5 bg-slate-800/70 rounded-2xl border border-slate-700 hover:bg-slate-800 transition-all cursor-pointer group"
+                                >
                                         <div className="flex items-center gap-3 mb-2">
                                             <Hash className="w-5 h-5 text-sky-300 font-bold" />
                                             <p className="text-base font-bold text-sky-300">

@@ -1,110 +1,338 @@
 import { stateService } from '../services/stateService.js';
 import { hashRoomPassword, verifyRoomPassword } from '../utils/passwordSecurity.js';
+import { v4 as uuidv4 } from 'uuid';
+
+// ── REST handlers (used by routes/api.js) ──────────────────────────────────
+// The audio-rooms list/create/join flow is REST-driven (the client fetches
+// these directly from AudioRoomsListPage/CreateRoomModal/AudioRoomComponent);
+// only in-room realtime state (join/leave/mute/chat/etc, below) goes over
+// Socket.IO via registerRoomHandlers.
 
 export const getRooms = async (req, res) => {
-    const rooms = await stateService.getRooms();
-    const publicRooms = rooms.map(({ password_hash, ...rest }) => rest);
-    res.json(publicRooms);
+  const rooms = await stateService.getRooms();
+  const publicRooms = rooms.map(({ password_hash, ...rest }) => rest);
+  res.json(publicRooms);
 };
 
 export const createRoom = async (req, res) => {
-    const {
-        title, description, host_id, host_name, max_participants = 10,
-        allow_chat = true, allow_media = false, is_private = false, password = null
-    } = req.body;
+  const {
+    title,
+    description = '',
+    host_id,
+    host_name,
+    max_participants = 20,
+    allow_chat = true,
+    allow_media = true,
+    is_private = false,
+    password
+  } = req.body;
 
-    if (is_private && !password) {
-        return res.status(400).json({ error: 'Password is required for private rooms' });
-    }
+  const password_hash = is_private ? await hashRoomPassword(password) : null;
 
-    const password_hash = is_private ? await hashRoomPassword(password) : null;
+  const room = {
+    id: uuidv4(),
+    title,
+    description,
+    host_id,
+    host_name,
+    max_participants,
+    allow_chat,
+    allow_media,
+    is_private,
+    password_hash,
+    created_at: new Date().toISOString()
+  };
 
-    const newRoom = {
-        id: Date.now().toString(),
-        title, description, host_id, host_name, max_participants,
-        is_active: true, allow_chat, allow_media, allow_screen_share: false,
-        is_muted_by_default: false, is_private, password_hash,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-    };
+  await stateService.createRoom(room);
 
-    await stateService.createRoom(newRoom);
+  const { password_hash: _omit, ...publicRoom } = room;
 
-    // Broadcast new room to all list-page clients (exclude password_hash)
-    if (req.io) {
-        const { password_hash: _omit, ...publicRoom } = newRoom;
-        req.io.emit('room-created', publicRoom);
-    }
+  // Let anyone already on the room list see the new room appear live.
+  req.io?.emit('room-created', publicRoom);
 
-    const { password_hash: _omit, ...publicRoom } = newRoom;
-    res.json(publicRoom);
+  res.status(201).json(publicRoom);
 };
 
 export const getRoom = async (req, res) => {
-    const room = await stateService.getRoom(req.params.id);
-    if (!room) return res.status(404).json({ error: 'Room not found' });
-    const { password_hash, ...publicRoom } = room;
-    res.json(publicRoom);
+  const room = await stateService.getRoom(req.params.id);
+  if (!room) return res.status(404).json({ error: 'Room not found' });
+
+  const { password_hash, ...publicRoom } = room;
+  res.json(publicRoom);
 };
 
 export const verifyRoomAccess = async (req, res) => {
-    const room = await stateService.getRoom(req.params.id);
-    if (!room) return res.status(404).json({ error: 'Room not found' });
+  const room = await stateService.getRoom(req.params.id);
+  if (!room) return res.status(404).json({ error: 'Room not found' });
 
-    if (!room.is_private || !room.password_hash) {
-        return res.json({ valid: true });
-    }
-
-    const { password } = req.body;
-    if (!password) {
-        return res.status(400).json({ error: 'Password is required' });
-    }
-
-    const isValid = await verifyRoomPassword(password, room.password_hash);
-    res.json({ valid: isValid });
+  const valid = await verifyRoomPassword(req.body.password, room.password_hash);
+  res.json({ valid });
 };
 
 export const updateRoomSettings = async (req, res) => {
-    const { id } = req.params;
-    const { allow_chat, allow_media, allow_screen_share, is_muted_by_default } = req.body;
+  const room = await stateService.updateRoom(req.params.id, req.body);
+  if (!room) return res.status(404).json({ error: 'Room not found' });
 
-    const updates = {};
-    if (allow_chat !== undefined) updates.allow_chat = allow_chat;
-    if (allow_media !== undefined) updates.allow_media = allow_media;
-    if (allow_screen_share !== undefined) updates.allow_screen_share = allow_screen_share;
-    if (is_muted_by_default !== undefined) updates.is_muted_by_default = is_muted_by_default;
-
-    const updatedRoom = await stateService.updateRoom(id, updates);
-    if (!updatedRoom) return res.status(404).json({ error: 'Room not found' });
-
-    if (req.io) {
-        req.io.to(id).emit('room-settings-updated', updates);
-    }
-
-    res.json(updatedRoom);
+  const { password_hash, ...publicRoom } = room;
+  req.io?.to(req.params.id).emit('room-media-settings-updated', publicRoom);
+  res.json(publicRoom);
 };
 
 export const deleteRoom = async (req, res) => {
-    const { id } = req.params;
-    const room = await stateService.getRoom(id);
-    if (!room) return res.status(404).json({ error: 'Room not found' });
+  const room = await stateService.getRoom(req.params.id);
+  if (!room) return res.status(404).json({ error: 'Room not found' });
 
-    await stateService.deleteRoom(id);
-
-    if (req.io) {
-        req.io.to(id).emit('room-closed', { roomId: id });
-        req.io.emit('room-deleted', { roomId: id });
-    }
-
-    res.json({ message: 'Room deleted successfully' });
+  await stateService.deleteRoom(req.params.id);
+  req.io?.emit('room-deleted', { roomId: req.params.id });
+  res.status(204).send();
 };
 
 export const getParticipants = async (req, res) => {
-    const participants = await stateService.getParticipants(req.params.id);
-    res.json(participants);
+  const participants = await stateService.getParticipants(req.params.id);
+  res.json(participants);
 };
 
 export const getMessages = async (req, res) => {
-    const messages = await stateService.getMessages(req.params.id);
-    res.json(messages);
+  const messages = await stateService.getMessages(req.params.id);
+  res.json(messages);
 };
+
+// ── Socket.IO handlers (used by sockets/index.js) ──────────────────────────
+
+export const registerRoomHandlers = (io, socket) => {
+
+    // Join Room
+    socket.on('join-room', async ({ roomId, userId, userName, userEmail, isHost = false }) => {
+        const isLocked = await stateService.isRoomLocked(roomId);
+        if (isLocked) {
+            socket.emit('room-entry-denied', { reason: 'locked' });
+            return;
+        }
+
+        console.log(`${userName} (${userEmail}) joining room ${roomId}`);
+
+        const existingSession = await stateService.getUserSession(userEmail);
+        if (existingSession && existingSession.isActive && existingSession.socketId !== socket.id) {
+            socket.emit('action-error', 'You are already in a meeting session from another device.');
+            return;
+        }
+
+        socket.join(roomId);
+        socket.userId = userId;
+        socket.userName = userName;
+        socket.userEmail = userEmail;
+        socket.roomId = roomId;
+        socket.isHost = isHost;
+
+        await stateService.setUserSession(userEmail, {
+            socketId: socket.id,
+            userId,
+            userName,
+            roomId,
+            isActive: true,
+            joinedAt: new Date().toISOString()
+        });
+
+        const currentParticipants = await stateService.getParticipants(roomId);
+
+        const duplicateSession = currentParticipants.find(p => p.userEmail === userEmail && p.userId !== userId);
+        if (duplicateSession) {
+            socket.emit('duplicate-session', { message: 'You are already in this meeting from another device' });
+            return;
+        }
+
+        const existingParticipant = currentParticipants.find(p => p.userId === userId);
+
+        if (!existingParticipant) {
+            const participant = {
+                userId,
+                userName,
+                userEmail,
+                isHost,
+                isMuted: false,
+                hasVideo: false,
+                isHandRaised: false,
+                joinedAt: new Date().toISOString(),
+                socketId: socket.id
+            };
+
+            await stateService.addParticipant(roomId, participant);
+            io.to(roomId).emit('participant-joined', participant);
+
+            const updatedParticipants = await stateService.getParticipants(roomId);
+            io.to(roomId).emit('participants-updated', updatedParticipants);
+
+            // Broadcast updated participant count to the global room list listeners
+            io.emit('room-participant-count', { roomId, count: updatedParticipants.length });
+        } else {
+            console.log(`Participant ${userId} already in room ${roomId} (reconnect)`);
+        }
+
+        const participants = await stateService.getParticipants(roomId);
+        socket.emit('participants-updated', participants);
+
+        const messages = await stateService.getMessages(roomId);
+        socket.emit('chat-history', messages);
+
+        const meeting = await stateService.getMeeting(roomId);
+        if (meeting) {
+            socket.emit('meeting-materials', meeting.materials || []);
+        }
+    });
+
+    // Leave Room
+    socket.on('leave-room', async ({ roomId, userId }) => {
+        await handleLeaveRoom(io, socket, roomId, userId);
+    });
+
+    // Disconnect
+    socket.on('disconnect', async () => {
+        if (socket.roomId && socket.userId) {
+            console.log(`Client disconnected: ${socket.userId}`);
+            await handleLeaveRoom(io, socket, socket.roomId, socket.userId);
+        }
+    });
+
+    // Participant Controls
+    socket.on('toggle-mute', async ({ roomId, userId, isMuted }) => {
+        const participants = await stateService.getParticipants(roomId);
+        const participant = participants.find(p => p.userId === userId);
+
+        if (participant) {
+            participant.isMuted = isMuted;
+            await stateService.addParticipant(roomId, participant);
+            io.to(roomId).emit('participant-muted', { userId, isMuted });
+            io.to(roomId).emit('participants-updated', participants);
+        }
+    });
+
+    socket.on('toggle-video', async ({ roomId, userId, hasVideo }) => {
+        const participants = await stateService.getParticipants(roomId);
+        const participant = participants.find(p => p.userId === userId);
+
+        if (participant) {
+            participant.hasVideo = hasVideo;
+            await stateService.addParticipant(roomId, participant);
+            io.to(roomId).emit('participant-video-toggled', { userId, hasVideo });
+            io.to(roomId).emit('participants-updated', participants);
+        }
+    });
+
+    socket.on('raise-hand', async ({ roomId, userId, raised }) => {
+        const participants = await stateService.getParticipants(roomId);
+        const participant = participants.find(p => p.userId === userId);
+
+        if (participant) {
+            participant.isHandRaised = raised !== undefined ? raised : !participant.isHandRaised;
+            await stateService.addParticipant(roomId, participant);
+            io.to(roomId).emit('hand-raised', { userId, raised: participant.isHandRaised });
+            io.to(roomId).emit('participants-updated', participants);
+        }
+    });
+
+    // Host Controls
+    socket.on('host-mute-participant', async ({ roomId, targetUserId, isMuted, hostId }) => {
+        const room = await stateService.getRoom(roomId);
+        const meeting = await stateService.getMeeting(roomId);
+        const actualHostId = room ? room.host_id : (meeting ? meeting.hostId : null);
+
+        if (actualHostId !== hostId) {
+            socket.emit('action-error', 'Only the host can mute participants');
+            return;
+        }
+
+        const participants = await stateService.getParticipants(roomId);
+        const participant = participants.find(p => p.userId === targetUserId);
+
+        if (participant) {
+            participant.isMuted = isMuted;
+            await stateService.addParticipant(roomId, participant);
+
+            const targetSocket = (await io.in(roomId).fetchSockets()).find(s => s.userId === targetUserId);
+            if (targetSocket) {
+                targetSocket.emit('host-action', {
+                    action: isMuted ? 'muted' : 'unmuted',
+                    message: `You have been ${isMuted ? 'muted' : 'unmuted'} by the host`
+                });
+            }
+
+            io.to(roomId).emit('participant-muted', { userId: targetUserId, isMuted });
+            io.to(roomId).emit('participants-updated', participants);
+        }
+    });
+
+    socket.on('host-set-media-permissions', async ({ roomId, hostId, allow_media }) => {
+        const room = await stateService.getRoom(roomId);
+        if (!room || room.host_id !== hostId) {
+            socket.emit('action-error', 'Only the host can change permissions');
+            return;
+        }
+
+        await stateService.updateRoom(roomId, { allow_media });
+        io.to(roomId).emit('room-media-settings-updated', { allow_media });
+    });
+
+    // Host lock/unlock room
+    socket.on('host-lock-room', async ({ roomId, hostId, lock }) => {
+        const room = await stateService.getRoom(roomId);
+        if (!room || room.host_id !== hostId) {
+            socket.emit('action-error', 'Only the host can lock this room');
+            return;
+        }
+
+        await stateService.setRoomLocked(roomId, lock);
+        io.to(roomId).emit('room-lock-status', { lock });
+    });
+
+    // Host ends room for everyone
+    socket.on('end-room', async ({ roomId }) => {
+        const room = await stateService.getRoom(roomId);
+        // Broadcast room-closed to everyone in the room
+        io.to(roomId).emit('room-closed', { roomId });
+        // Clean up
+        await stateService.deleteRoom(roomId);
+        // Broadcast globally so the list page removes this room
+        io.emit('room-deleted', { roomId });
+    });
+
+    socket.on('update-permissions', ({ roomId, settings }) => {
+        io.to(roomId).emit('permissions-updated', settings);
+    });
+};
+
+// Helper for leaving room
+async function handleLeaveRoom(io, socket, roomId, userId) {
+    console.log(`${userId} leaving room ${roomId}`);
+
+    if (socket.userEmail) {
+        const session = await stateService.getUserSession(socket.userEmail);
+        if (session) {
+            session.isActive = false;
+            await stateService.setUserSession(socket.userEmail, session);
+        }
+    }
+
+    await stateService.removeParticipant(roomId, userId);
+
+    io.to(roomId).emit('participant-left', { userId });
+
+    const remaining = await stateService.getParticipants(roomId);
+    io.to(roomId).emit('participants-updated', remaining);
+
+    // Broadcast updated count to list page
+    io.emit('room-participant-count', { roomId, count: remaining.length });
+
+    socket.leave(roomId);
+
+    if (remaining.length === 0) {
+        console.log(`Room ${roomId} is empty. Scheduling deletion check...`);
+        setTimeout(async () => {
+            const participants = await stateService.getParticipants(roomId);
+            if (participants.length === 0) {
+                console.log(`Deleting empty room ${roomId}`);
+                await stateService.deleteRoom(roomId);
+                io.emit('room-deleted', { roomId });
+            }
+        }, 30000);
+    }
+}

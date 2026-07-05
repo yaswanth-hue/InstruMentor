@@ -12,7 +12,6 @@ import {
   UserPlus, UserMinus, Sparkles, Check, Clock
 } from 'lucide-react';
 import CourseContentHub from '../components/CourseContentHub';
-import LoadingSpinner from '../components/LoadingSpinner';
 
 const fmtMonth = raw => {
   const d = raw?.toDate ? raw.toDate() : new Date(raw);
@@ -55,7 +54,32 @@ const CourseDetailPage = () => {
     (course?.enrolledUsers || []).map(uid => `user-${uid}@email.com`);
 
   /* ── Loading ── */
-  if (loading) return <LoadingSpinner message="Loading course…" />;
+  if (loading) return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-900" style={{ width: '100%', maxWidth: 'none' }}>
+      <div className="relative overflow-hidden border-b border-slate-800/80">
+        <div className="relative w-full px-4 sm:px-6 py-5 sm:py-7 animate-pulse">
+          <div className="mb-5 h-7 w-32 rounded-xl bg-slate-800/60" />
+          <div className="flex items-start gap-4 mb-4">
+            <div className="w-11 h-11 rounded-2xl bg-slate-800/60 shrink-0" />
+            <div className="flex-1 min-w-0 space-y-2.5 pt-1">
+              <div className="h-6 w-2/3 rounded-lg bg-slate-800/60" />
+              <div className="h-4 w-1/2 rounded-lg bg-slate-800/50" />
+            </div>
+          </div>
+          <div className="flex gap-4 mb-5 pl-[60px]">
+            <div className="h-4 w-24 rounded bg-slate-800/50" />
+            <div className="h-4 w-24 rounded bg-slate-800/50" />
+          </div>
+          <div className="flex gap-2 pl-[60px]">
+            <div className="h-7 w-28 rounded-xl bg-slate-800/50" />
+          </div>
+        </div>
+      </div>
+      <div className="w-full px-4 sm:px-6 py-5 sm:py-6" style={{ width: '100%', maxWidth: 'none' }}>
+        <div className="rounded-2xl border border-slate-800/60 bg-slate-900/40 h-64 animate-pulse" />
+      </div>
+    </div>
+  );
 
   /* ── Not found ── */
   if (!course) return (

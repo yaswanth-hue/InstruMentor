@@ -30,6 +30,7 @@ const CreateRoomModal = ({ isOpen, onClose, onCreateRoom, user }) => {
     setError('');
 
     if (!formData.title.trim()) { setError('Room title is required'); return; }
+    if (formData.title.trim().length < 3) { setError('Room title must be at least 3 characters'); return; }
     if (formData.isPrivate) {
       if (!formData.password) { setError('Password is required for private rooms'); return; }
       if (formData.password.length < 6) { setError('Password must be at least 6 characters'); return; }
@@ -54,7 +55,21 @@ const CreateRoomModal = ({ isOpen, onClose, onCreateRoom, user }) => {
         })
       });
 
-      if (!response.ok) throw new Error('Failed to create room');
+      if (!response.ok) {
+        let message = 'Failed to create room';
+        try {
+          const body = await response.json();
+          if (Array.isArray(body?.errors) && body.errors.length > 0) {
+            // express-validator error shape: { errors: [{ msg, path, ... }] }
+            message = body.errors.map(e => e.msg).join(' ');
+          } else if (body?.error) {
+            message = body.error;
+          }
+        } catch {
+          // Response wasn't JSON — fall back to the generic message above.
+        }
+        throw new Error(message);
+      }
       const newRoom = await response.json();
       onCreateRoom(newRoom);
       onClose();

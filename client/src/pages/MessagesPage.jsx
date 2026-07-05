@@ -33,6 +33,7 @@ const MessagesPage = () => {
   const [sendError, setSendError] = useState('');
   const currentUserId = auth.currentUser?.uid;
   const markedReadIdsRef = useRef(new Set());
+  const readReceiptsDisabledRef = useRef(false);
 
   // Message ids in a conversation that were sent to me and not yet read.
   const getUnreadMessageIds = (convo) =>
@@ -40,20 +41,24 @@ const MessagesPage = () => {
       .filter((m) => m.receiverId === currentUserId && m.read !== true)
       .map((m) => m.id);
 
-  // Attempts to mark message ids as read exactly once each per page session.
-  // This prevents a runaway retry loop: if the write fails (e.g. Firestore
-  // security rules don't allow the receiver to update the message doc),
-  // Firestore's snapshot listener will keep reporting the same ids as
-  // unread on every re-render, and without this guard we'd hammer the
-  // write endlessly instead of just leaving the dot showing.
+  // Attempts to mark message ids as read exactly once each per page session,
+  // and permanently stops trying for the rest of the session after the
+  // first failure (e.g. Firestore rules don't allow the receiver to update
+  // a message doc). This is intentionally only ever called from explicit
+  // user actions (opening a conversation) — never from a reactive effect
+  // tied to the conversations listener — so it can never re-trigger itself
+  // in a loop no matter what Firestore reports back.
   const tryMarkRead = (ids) => {
+    if (readReceiptsDisabledRef.current) return;
     const fresh = (ids || []).filter((id) => id && !markedReadIdsRef.current.has(id));
     if (fresh.length === 0) return;
     fresh.forEach((id) => markedReadIdsRef.current.add(id));
     markMessagesRead(fresh).catch((e) => {
+      readReceiptsDisabledRef.current = true;
       // eslint-disable-next-line no-console
       console.error(
-        'Failed to mark messages as read (check that your Firestore rules let the receiver update a message\'s "read" field):',
+        'Failed to mark messages as read — disabling read receipts for this session. ' +
+          'Check that your Firestore rules let the receiver update a message\'s "read" field:',
         e
       );
     });
@@ -115,6 +120,9 @@ const MessagesPage = () => {
   // Once conversations load/update, if we have a draft/active chat that now
   // has a real thread (e.g. the first message went through, or a thread
   // already existed), sync the active chat to the live data.
+  // Note: this intentionally does NOT call tryMarkRead — marking messages
+  // read only ever happens from an explicit user action (opening a thread),
+  // never reactively off this listener, so it can't retrigger itself.
   useEffect(() => {
     if (!activeChat?.userId) return;
     const live = conversations.find((c) => c.userId === activeChat.userId);
@@ -125,9 +133,6 @@ const MessagesPage = () => {
       live.lastMessage?.id !== activeChat.lastMessage?.id;
     if (changed) {
       setActiveChat(live);
-      // The thread is already open on screen — any newly arrived message
-      // for it counts as seen immediately, so clear its unread state too.
-      tryMarkRead(getUnreadMessageIds(live));
     }
   }, [conversations]); // eslint-disable-line react-hooks/exhaustive-deps
 

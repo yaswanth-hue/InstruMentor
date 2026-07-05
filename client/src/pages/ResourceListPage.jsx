@@ -40,7 +40,6 @@ const ResourceListPage = () => {
           return;
         }
 
-        console.log("Querying resources with:", instrumentKey, levelKey);
 
         const q = query(
           collection(db, "resources"),

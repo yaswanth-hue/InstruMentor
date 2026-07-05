@@ -463,6 +463,9 @@ const CourseContentHub = ({ courseId, courseTitle, isInstructor, enrolledEmails,
       await createMeeting({
         courseId, title: newMeeting.title, description: newMeeting.description,
         scheduledTime: dt,
+        hostId: currentUserId,
+        hostName: auth.currentUser?.displayName || auth.currentUser?.email,
+        hostEmail: auth.currentUser?.email,
         participants: [currentUserId, ...(enrolledEmails || [])],
         isActive: false,
       });

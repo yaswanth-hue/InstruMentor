@@ -4,7 +4,6 @@ import { Helmet } from 'react-helmet-async';
 import { doc, getDoc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { auth, db, getUserProfile, likePost, unlikePost, addComment, getComments } from '../firebase';
 import {
-  ArrowLeft,
   User,
   Heart,
   MessageCircle,
@@ -27,11 +26,11 @@ const PostDetailPage = () => {
   const [submittingComment, setSubmittingComment] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
-  const [showCommentModal, setShowCommentModal] = useState(false);
   const [isLiking, setIsLiking] = useState(false);
 
   useEffect(() => {
     loadPost();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [postId]);
 
   const loadPost = async () => {
@@ -139,8 +138,9 @@ const PostDetailPage = () => {
     }
   };
 
-  const handleAddComment = async (e) => {
-    e.preventDefault();
+  // Inline comment box, matching the Explore post viewer — no separate
+  // "Add Comment" popup.
+  const handleAddComment = async () => {
     if (!commentText.trim()) return;
 
     const userId = auth.currentUser?.uid;
@@ -152,18 +152,26 @@ const PostDetailPage = () => {
     try {
       setSubmittingComment(true);
       const userProfile = await getUserProfile(userId);
-
-      await addComment(postId, {
+      const newComment = {
         userId,
         userName: userProfile?.displayName || 'Anonymous',
         userProfilePic: userProfile?.profilePic || '',
-        text: commentText.trim()
+        text: commentText.trim(),
+        timestamp: new Date().toISOString()
+      };
+
+      await addComment(postId, {
+        userId: newComment.userId,
+        userName: newComment.userName,
+        userProfilePic: newComment.userProfilePic,
+        text: newComment.text
       });
 
-      // Reload the post to get updated comments
-      await loadPost();
+      setPost(prev => ({
+        ...prev,
+        comments: [...(prev.comments || []), newComment]
+      }));
       setCommentText('');
-      setShowCommentModal(false);
     } catch (error) {
       console.error('Error adding comment:', error);
       alert('Failed to add comment: ' + error.message);
@@ -201,6 +209,14 @@ const PostDetailPage = () => {
     }
   };
 
+  const goBack = () => {
+    if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigate('/home');
+    }
+  };
+
   if (loading) {
     return <LoadingSpinner message="Loading post…" />;
   }
@@ -212,144 +228,186 @@ const PostDetailPage = () => {
   return (
     <>
       <Helmet>
-        <title>{post?.author?.displayName ? `${post.author.displayName}'s Post` : 'Post'} | InstruMentor</title>
-        <meta name="description" content={post?.caption || `View this post by ${post?.author?.displayName || 'a musician'} on InstruMentor - connect with musicians worldwide.`} />
-        <meta property="og:title" content={`${post?.author?.displayName || 'Musician'}'s Post | InstruMentor`} />
-        <meta property="og:description" content={post?.caption || 'View this post on InstruMentor'} />
-        <meta property="og:image" content={post?.imageUrl || post?.mediaUrl || 'https://via.placeholder.com/400'} />
+        <title>{postOwner?.displayName ? `${postOwner.displayName}'s Post` : 'Post'} | InstruMentor</title>
+        <meta name="description" content={post?.content || `View this post by ${postOwner?.displayName || 'a musician'} on InstruMentor - connect with musicians worldwide.`} />
+        <meta property="og:title" content={`${postOwner?.displayName || 'Musician'}'s Post | InstruMentor`} />
+        <meta property="og:description" content={post?.content || 'View this post on InstruMentor'} />
+        <meta property="og:image" content={post?.imageUrl || 'https://via.placeholder.com/400'} />
         <meta property="og:url" content={typeof window !== 'undefined' ? window.location.href : ''} />
         <meta property="og:type" content="article" />
         <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:title" content={`${post?.author?.displayName || 'Musician'}'s Post | InstruMentor`} />
-        <meta name="twitter:description" content={post?.caption || 'View this post on InstruMentor'} />
-        <meta name="twitter:image" content={post?.imageUrl || post?.mediaUrl || 'https://via.placeholder.com/400'} />
+        <meta name="twitter:title" content={`${postOwner?.displayName || 'Musician'}'s Post | InstruMentor`} />
+        <meta name="twitter:description" content={post?.content || 'View this post on InstruMentor'} />
+        <meta name="twitter:image" content={post?.imageUrl || 'https://via.placeholder.com/400'} />
       </Helmet>
-      <div className="h-screen bg-gray-50 flex flex-col overflow-hidden" style={{width: '100%', maxWidth: 'none'}}>
-      {/* Header */}
-      <header className="flex-shrink-0 bg-white border-b border-gray-200 shadow-sm">
-        <div className="px-4 sm:px-6">
-          <div className="flex items-center h-14">
-            <button
-              onClick={() => navigate('/home')}
-              className="p-2 text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-all duration-200"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <h1 className="ml-3 text-lg font-bold text-gray-900">
-              Post
-            </h1>
-          </div>
-        </div>
-      </header>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-        {/* Left Side - Image */}
-        <div className="flex-shrink-0 h-[38vh] md:h-auto md:flex-1 bg-black flex items-center justify-center overflow-hidden">
-          {post.imageUrl ? (
-            <img
-              src={post.imageUrl}
-              alt="Post"
-              className="max-w-full max-h-full object-contain"
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center">
-              <p className="text-gray-400">No image</p>
-            </div>
-          )}
-        </div>
+      {/* Same shell as the Explore post viewer: full-bleed dark backdrop,
+          centered card, floating close button — instead of the old
+          full-page header-bar layout. */}
+      <div className="fixed inset-0 bg-black/90 backdrop-blur-sm z-50 flex items-center justify-center p-0 sm:p-4">
+        <div className="relative w-full h-full sm:h-[90vh] bg-zinc-900 sm:rounded-3xl border border-white/10 overflow-hidden shadow-2xl flex flex-col md:flex-row">
+          {/* Close Button */}
+          <button
+            onClick={goBack}
+            className="absolute top-4 right-4 z-20 p-3 bg-zinc-950/80 hover:bg-zinc-800 border border-white/10 rounded-full transition-colors"
+          >
+            <X className="w-6 h-6 text-zinc-200" />
+          </button>
 
-        {/* Right Side - Post Details */}
-        <div className="w-full md:w-[420px] flex-1 md:flex-none min-h-0 flex flex-col bg-white border-l border-gray-200">
-          {/* Header with User Info */}
-          <div className="px-4 py-3 border-b border-gray-100 bg-white flex-shrink-0">
-            <div
-              className="flex items-center gap-3 cursor-pointer"
-              onClick={() => navigate(`/user-profile/${postOwner.uid || post.userId}`)}
-            >
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center overflow-hidden">
-                {postOwner.profilePic ? (
-                  <img src={postOwner.profilePic} alt="Profile" className="w-full h-full object-cover" />
-                ) : (
-                  <User className="w-5 h-5 text-white" />
-                )}
-              </div>
-              <div className="flex-1">
-                <p className="font-semibold text-gray-900 text-sm">{postOwner.displayName}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Caption */}
-          {post.content && (
-            <div className="px-4 py-3 border-b border-gray-100 bg-white flex-shrink-0">
-              <p className="text-gray-900 text-sm leading-relaxed">
-                <span className="font-semibold">{postOwner.displayName}</span> {post.content}
-              </p>
-            </div>
-          )}
-
-          {/* Comments Section - Scrollable */}
-          <div className="flex-1 overflow-y-auto px-4 py-2 space-y-4 bg-white">
-            {post.comments && post.comments.length > 0 ? (
-              post.comments.map((comment, idx) => (
-                <div key={idx} className="flex gap-2.5 items-start">
-                  <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 bg-gradient-to-br from-emerald-400 to-teal-500">
-                    {comment.userProfilePic ? (
-                      <img src={comment.userProfilePic} alt={comment.userName} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <User className="w-4 h-4 text-white" />
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-gray-900 leading-tight">
-                      <span className="font-semibold">{comment.userName}</span> <span className="text-gray-700">{comment.text}</span>
-                    </p>
-                    <p className="text-xs text-gray-400 mt-1">
-                      {new Date(comment.timestamp).toLocaleString('en-US', {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </p>
-                  </div>
-                </div>
-              ))
+          {/* Left Side - Image */}
+          <div className="flex-1 bg-black flex items-center justify-center relative min-h-[40vh] md:min-h-0">
+            {post.imageUrl ? (
+              post.mediaType === 'reel' || post.mediaType === 'video' ? (
+                <video
+                  src={post.imageUrl}
+                  controls
+                  playsInline
+                  loop
+                  className="max-w-full max-h-full object-contain"
+                />
+              ) : (
+                <img
+                  src={post.imageUrl}
+                  alt="Post"
+                  className="max-w-full max-h-full object-contain"
+                />
+              )
             ) : (
-              <div className="flex items-center justify-center h-full">
-                <div className="text-center">
-                  <MessageCircle className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-                  <p className="text-gray-400 text-sm">No comments yet</p>
-                </div>
+              <div className="w-full h-full flex items-center justify-center">
+                <p className="text-zinc-500">No image</p>
               </div>
             )}
           </div>
 
-          {/* Action Buttons - Fixed at bottom */}
-          <div className="border-t border-gray-100 bg-white flex-shrink-0">
-            {/* Like, Comment, Share, Save buttons */}
-            <div className="px-4 py-2 flex items-center justify-between">
-              <div className="flex items-center gap-4">
+          {/* Right Side - Post Details */}
+          <div className="w-full md:w-[400px] flex flex-col bg-zinc-900 border-t md:border-t-0 md:border-l border-white/10 max-h-[60vh] md:max-h-full">
+            {/* Header with User Info */}
+            <div className="p-4 border-b border-white/10">
+              <div
+                className="flex items-center gap-3 cursor-pointer hover:bg-white/5 rounded-2xl p-2 -m-2 transition-colors"
+                onClick={() => navigate(`/user-profile/${postOwner.uid || post.userId}`)}
+              >
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-sky-400 to-cyan-400 flex items-center justify-center overflow-hidden border border-white/10">
+                  {postOwner.profilePic ? (
+                    <img src={postOwner.profilePic} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (
+                    <User className="w-6 h-6 text-white" />
+                  )}
+                </div>
+                <div>
+                  <p className="font-semibold text-zinc-50">{postOwner.displayName}</p>
+                  {post.timestamp?.toDate && (
+                    <p className="text-xs text-zinc-500">
+                      {post.timestamp.toDate().toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric'
+                      })}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Caption */}
+            {post.content && (
+              <div className="p-4 border-b border-white/10">
+                <p className="text-zinc-200 text-sm leading-relaxed whitespace-pre-wrap">
+                  {post.content}
+                </p>
+              </div>
+            )}
+
+            {/* Comments Section - Scrollable */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {post.comments && post.comments.length > 0 ? (
+                post.comments.map((comment, idx) => (
+                  <div key={idx} className="flex gap-3">
+                    <div className="w-8 h-8 rounded-2xl overflow-hidden flex-shrink-0 bg-gradient-to-br from-sky-400 to-cyan-400 border border-white/10">
+                      {comment.userProfilePic ? (
+                        <img src={comment.userProfilePic} alt={comment.userName} className="w-full h-full object-cover" />
+                      ) : (
+                        <User className="w-4 h-4 text-white m-auto mt-2" />
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <div className="rounded-2xl bg-white/5 border border-white/5 px-3 py-2">
+                        <p className="font-semibold text-sm text-zinc-100">{comment.userName}</p>
+                        <p className="text-sm text-zinc-300">{comment.text}</p>
+                      </div>
+                      <p className="text-xs text-zinc-500 mt-1 ml-3">
+                        {new Date(comment.timestamp).toLocaleString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-8">
+                  <MessageCircle className="w-12 h-12 text-zinc-700 mx-auto mb-2" />
+                  <p className="text-zinc-500 text-sm">No comments yet</p>
+                </div>
+              )}
+            </div>
+
+            {/* Add a comment, right here */}
+            <div className="px-4 pt-3 border-t border-white/10">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={commentText}
+                  onChange={(e) => setCommentText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !submittingComment) {
+                      handleAddComment();
+                    }
+                  }}
+                  placeholder="Write a comment..."
+                  className="flex-1 px-4 py-2.5 rounded-2xl border border-white/10 bg-white/5 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-sky-400 transition-colors"
+                />
                 <button
-                  onClick={handleLikePost}
-                  disabled={isLiking}
-                  className="hover:opacity-70 transition-opacity disabled:opacity-50"
+                  onClick={handleAddComment}
+                  disabled={submittingComment || !commentText.trim()}
+                  className="p-2.5 rounded-2xl bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  <Heart className={`w-6 h-6 ${
-                    isLiked
-                      ? 'fill-red-500 text-red-500'
-                      : 'text-gray-800'
-                  }`} />
+                  {submittingComment ? (
+                    <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+                  ) : (
+                    <Send className="w-5 h-5" />
+                  )}
                 </button>
-                <button
-                  onClick={() => setShowCommentModal(true)}
-                  className="hover:opacity-70 transition-opacity"
-                >
-                  <MessageCircle className="w-6 h-6 text-gray-800" />
-                </button>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="p-4">
+              <div className="flex items-center justify-around">
+                <div className="flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-white/5 transition-colors">
+                  <button onClick={handleLikePost} disabled={isLiking} className="group disabled:opacity-50">
+                    <Heart className={`w-5 h-5 transition-colors ${isLiked ? 'fill-cyan-400 text-cyan-300' : 'text-zinc-300 group-hover:text-cyan-300'
+                      }`} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      loadLikesList();
+                      setShowLikesModal(true);
+                    }}
+                    className="text-sm font-semibold text-zinc-300 hover:text-white hover:underline"
+                  >
+                    {post.likes?.length || 0}
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 px-4 py-2">
+                  <MessageCircle className="w-5 h-5 text-zinc-300" />
+                  <span className="text-sm font-semibold text-zinc-300">
+                    {post.comments?.length || 0}
+                  </span>
+                </div>
                 <button
                   onClick={() => {
                     const postLink = `${window.location.origin}/post/${post.id}`;
@@ -359,34 +417,18 @@ const PostDetailPage = () => {
                       alert('Failed to copy link');
                     });
                   }}
-                  className="hover:opacity-70 transition-opacity"
+                  className="flex items-center gap-2 px-4 py-2 hover:bg-white/5 rounded-xl transition-colors"
                 >
-                  <Share2 className="w-6 h-6 text-gray-800" />
+                  <Share2 className="w-5 h-5 text-zinc-300" />
+                </button>
+                <button
+                  onClick={handleSavePost}
+                  className="flex items-center gap-2 px-4 py-2 hover:bg-white/5 rounded-xl transition-colors"
+                >
+                  <Bookmark className={`w-5 h-5 transition-colors ${isSaved ? 'fill-amber-300 text-amber-300' : 'text-zinc-300 hover:text-amber-200'
+                    }`} />
                 </button>
               </div>
-              <button
-                onClick={handleSavePost}
-                className="hover:opacity-70 transition-opacity"
-              >
-                <Bookmark className={`w-6 h-6 ${
-                  isSaved
-                    ? 'fill-gray-900 text-gray-900'
-                    : 'text-gray-800'
-                }`} />
-              </button>
-            </div>
-
-            {/* Likes count */}
-            <div className="px-4 pb-3">
-              <button
-                onClick={() => {
-                  loadLikesList();
-                  setShowLikesModal(true);
-                }}
-                className="text-sm font-semibold text-gray-900 hover:text-gray-600 transition-colors"
-              >
-                {post.likes?.length || 0} {post.likes?.length === 1 ? 'like' : 'likes'}
-              </button>
             </div>
           </div>
         </div>
@@ -394,21 +436,21 @@ const PostDetailPage = () => {
 
       {/* Likes Modal */}
       {showLikesModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <div className="bg-zinc-900 rounded-3xl border border-white/10 shadow-2xl w-full max-w-md max-h-[80vh] overflow-hidden">
             {/* Modal Header */}
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-5 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-900">Likes</h2>
+            <div className="sticky top-0 bg-zinc-900 border-b border-white/10 px-6 py-5 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-zinc-50">Likes</h2>
               <button
                 onClick={() => setShowLikesModal(false)}
-                className="p-2 hover:bg-gray-100 rounded-full transition-all duration-200 hover:rotate-90"
+                className="p-2 hover:bg-white/5 rounded-full transition-colors"
               >
-                <X className="w-5 h-5 text-gray-600" />
+                <X className="w-5 h-5 text-zinc-300" />
               </button>
             </div>
 
             {/* Likes List */}
-            <div className="p-5 overflow-y-auto max-h-[calc(80vh-90px)] bg-gray-50">
+            <div className="p-4 overflow-y-auto max-h-[calc(80vh-90px)]">
               {likesList.length > 0 ? (
                 <div className="space-y-2">
                   {likesList.map((user) => (
@@ -418,9 +460,9 @@ const PostDetailPage = () => {
                         setShowLikesModal(false);
                         navigate(`/user-profile/${user.id}`);
                       }}
-                      className="flex items-center gap-4 p-3 hover:bg-white rounded-xl cursor-pointer transition-all duration-200 border border-transparent hover:border-gray-200 hover:shadow-sm"
+                      className="flex items-center gap-4 p-3 hover:bg-white/5 rounded-2xl cursor-pointer transition-colors"
                     >
-                      <div className="w-12 h-12 rounded-full overflow-hidden bg-gradient-to-br from-orange-400 to-rose-500 flex items-center justify-center shadow-md">
+                      <div className="w-12 h-12 rounded-2xl overflow-hidden bg-gradient-to-br from-sky-400 to-cyan-400 flex items-center justify-center border border-white/10">
                         {user.profilePic ? (
                           <img src={user.profilePic} alt={user.displayName} className="w-full h-full object-cover" />
                         ) : (
@@ -428,9 +470,9 @@ const PostDetailPage = () => {
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-gray-900 truncate">{user.displayName}</p>
+                        <p className="font-semibold text-zinc-100 truncate">{user.displayName}</p>
                         {user.bio && (
-                          <p className="text-sm text-gray-500 line-clamp-1">{user.bio}</p>
+                          <p className="text-sm text-zinc-400 line-clamp-1">{user.bio}</p>
                         )}
                       </div>
                     </div>
@@ -438,68 +480,14 @@ const PostDetailPage = () => {
                 </div>
               ) : (
                 <div className="text-center py-16">
-                  <Heart className="w-16 h-16 text-gray-300 mx-auto mb-3" />
-                  <p className="text-gray-600 font-medium">No likes yet</p>
+                  <Heart className="w-16 h-16 text-zinc-700 mx-auto mb-3" />
+                  <p className="text-zinc-400 font-medium">No likes yet</p>
                 </div>
               )}
             </div>
           </div>
         </div>
       )}
-
-      {/* Comment Modal */}
-      {showCommentModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
-            {/* Modal Header */}
-            <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-gray-900">Add Comment</h2>
-              <button
-                onClick={() => {
-                  setShowCommentModal(false);
-                  setCommentText('');
-                }}
-                className="p-2 hover:bg-gray-100 rounded-full transition-all duration-200"
-              >
-                <X className="w-5 h-5 text-gray-600" />
-              </button>
-            </div>
-
-            {/* Comment Form */}
-            <form onSubmit={handleAddComment} className="p-6">
-              <textarea
-                placeholder="Write your comment..."
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                className="w-full min-h-[120px] text-sm text-gray-900 placeholder-gray-400 focus:outline-none bg-gray-50 rounded-lg p-4 border border-gray-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 transition-all resize-none"
-                disabled={submittingComment}
-                autoFocus
-              />
-              <div className="flex justify-end gap-3 mt-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowCommentModal(false);
-                    setCommentText('');
-                  }}
-                  className="px-5 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-lg transition-all"
-                  disabled={submittingComment}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={!commentText.trim() || submittingComment}
-                  className="px-5 py-2 text-sm font-medium text-white bg-blue-500 hover:bg-blue-600 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                >
-                  {submittingComment ? 'Posting...' : 'Post Comment'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
     </>
   );
 };

@@ -7,12 +7,16 @@ import { db } from '../firebase';
 // Icon-only, in this exact order — Home sits in the middle and is the
 // default/landing tab. Order matters, it's what the sliding indicator
 // below walks across.
+// matchPrefixes lists every route prefix that should count as "this tab is
+// active" — e.g. an individual course page lives at /course/:id (singular),
+// which doesn't start with /courses (plural), so it needs to be listed
+// explicitly or it silently falls back to the Home tab.
 const NAV_ITEMS = [
-  { path: '/users', icon: Users, label: 'Discover musicians' },
-  { path: '/courses', icon: BookOpen, label: 'Browse courses' },
+  { path: '/users', icon: Users, label: 'Discover musicians', matchPrefixes: ['/users', '/user-profile'] },
+  { path: '/courses', icon: BookOpen, label: 'Browse courses', matchPrefixes: ['/courses', '/course/'] },
   { path: '/home', icon: Home, label: 'Home', isDefault: true },
-  { path: '/audio-rooms', icon: Mic, label: 'Join audio rooms' },
-  { path: '/profile', icon: User, label: 'Profile' },
+  { path: '/audio-rooms', icon: Mic, label: 'Join audio rooms', matchPrefixes: ['/audio-rooms'] },
+  { path: '/profile', icon: User, label: 'Profile', matchPrefixes: ['/profile'] },
 ];
 
 const DEFAULT_INDEX = NAV_ITEMS.findIndex((item) => item.isDefault);
@@ -56,7 +60,9 @@ const BottomNav = ({ user }) => {
   if (!user) return null;
   if (HIDDEN_ROUTE_PATTERNS.some((pattern) => pattern.test(location.pathname))) return null;
 
-  const matchedIndex = NAV_ITEMS.findIndex((item) => location.pathname.startsWith(item.path));
+  const matchedIndex = NAV_ITEMS.findIndex((item) =>
+    (item.matchPrefixes || [item.path]).some((prefix) => location.pathname.startsWith(prefix))
+  );
   const activeIndex = matchedIndex !== -1 ? matchedIndex : DEFAULT_INDEX;
 
   return (

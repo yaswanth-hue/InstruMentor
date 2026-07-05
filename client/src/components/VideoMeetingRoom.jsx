@@ -179,12 +179,10 @@ const VideoMeetingRoom = () => {
   // Socket connection status (separate effect, always active)
   useEffect(() => {
     const handleConnect = () => {
-      console.log('Socket connected:', socket.id);
       setSocketConnected(true);
     };
 
     const handleDisconnect = () => {
-      console.log('Socket disconnected');
       setSocketConnected(false);
     };
 
@@ -226,7 +224,6 @@ const VideoMeetingRoom = () => {
     const userName = auth.currentUser?.displayName || auth.currentUser?.email;
     const userEmail = auth.currentUser?.email;
 
-    console.log('Initializing meeting room for user:', userId);
 
     // Get initial media stream with high-quality audio
     navigator.mediaDevices.getUserMedia({
@@ -245,14 +242,12 @@ const VideoMeetingRoom = () => {
 
         // Mute audio by default
         stream.getAudioTracks().forEach(track => track.enabled = false);
-        console.log('Media stream initialized, audio track:', stream.getAudioTracks()[0]);
 
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
         }
 
         // Join room via socket
-        console.log('Joining room:', meetingId, 'as user:', userId);
         socket.emit('join-room', {
           roomId: meetingId,
           userId,
@@ -260,7 +255,6 @@ const VideoMeetingRoom = () => {
           userEmail,
           isHost
         });
-        console.log('Join-room event emitted');
 
         // Listen for duplicate session errors
         socket.on('duplicate-session', ({ message }) => {
@@ -290,12 +284,10 @@ const VideoMeetingRoom = () => {
 
     // Socket event listeners
     socket.on('participants-updated', (participantsList) => {
-      console.log('Participants updated:', participantsList);
       setParticipants(participantsList);
     });
 
     socket.on('participant-joined', async (participant) => {
-      console.log('Participant joined:', participant);
 
       // Create peer connection for new participant
       if (participant.userId !== userId) {
@@ -304,7 +296,6 @@ const VideoMeetingRoom = () => {
     });
 
     socket.on('participant-left', ({ userId: leftUserId }) => {
-      console.log('Participant left:', leftUserId);
 
       // Close peer connection
       if (peerConnectionsRef.current[leftUserId]) {
@@ -321,33 +312,34 @@ const VideoMeetingRoom = () => {
     });
 
     socket.on('webrtc-offer', async ({ fromUserId, offer }) => {
-      console.log('Received offer from:', fromUserId);
       await handleOffer(fromUserId, offer);
     });
 
     socket.on('webrtc-answer', async ({ fromUserId, answer }) => {
-      console.log('Received answer from:', fromUserId);
       await handleAnswer(fromUserId, answer);
     });
 
     socket.on('webrtc-ice-candidate', async ({ fromUserId, candidate }) => {
-      console.log('Received ICE candidate from:', fromUserId);
       await handleIceCandidate(fromUserId, candidate);
     });
 
     socket.on('new-message', (msg) => {
-      console.log('New message received:', msg);
       setChatMessages(prev => [...prev, msg]);
     });
 
     socket.on('chat-history', (messages) => {
-      console.log('Chat history received:', messages);
       setChatMessages(messages);
     });
 
     socket.on('participant-muted', ({ userId: mutedUserId, isMuted }) => {
       setParticipants(prev =>
         prev.map(p => p.userId === mutedUserId ? { ...p, isMuted } : p)
+      );
+    });
+
+    socket.on('participant-video-toggled', ({ userId: toggledUserId, hasVideo }) => {
+      setParticipants(prev =>
+        prev.map(p => p.userId === toggledUserId ? { ...p, hasVideo } : p)
       );
     });
 
@@ -392,24 +384,18 @@ const VideoMeetingRoom = () => {
     });
 
     socket.on('hand-raised', ({ userId, raised }) => {
-      console.log('👋 Received hand-raised event:', { userId, raised });
-      console.log('👋 raised type:', typeof raised, 'raised value:', raised);
 
       // Only update if raised is explicitly true or false, ignore undefined
       if (raised === true || raised === false) {
         setRaisedHands(prev => {
           if (raised) {
             const newState = prev.includes(userId) ? prev : [...prev, userId];
-            console.log('👋 Updated raised hands (adding):', newState);
             return newState;
           } else {
             const newState = prev.filter(id => id !== userId);
-            console.log('👋 Updated raised hands (removing):', newState);
             return newState;
           }
         });
-      } else {
-        console.log('👋 Ignoring event with invalid raised value:', raised);
       }
     });
 
@@ -444,7 +430,6 @@ const VideoMeetingRoom = () => {
 
   // Auto-scroll chat
   useEffect(() => {
-    console.log('Chat messages updated, count:', chatMessages.length, chatMessages);
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
@@ -470,6 +455,13 @@ const VideoMeetingRoom = () => {
     try {
       const pc = new RTCPeerConnection(iceServers);
       peerConnectionsRef.current[targetUserId] = pc;
+      // The very first offer/answer exchange is done manually below, so the
+      // negotiationneeded event that fires from the initial addTrack calls
+      // should be ignored — otherwise we'd race a duplicate offer against
+      // the manual one. Once that initial exchange completes, this flag
+      // flips and later track changes (e.g. turning the camera on after
+      // joining with it off) correctly trigger a fresh offer.
+      let isInitialNegotiation = true;
 
       // Add local tracks to peer connection
       if (localStreamRef.current) {
@@ -491,11 +483,29 @@ const VideoMeetingRoom = () => {
 
       // Handle remote stream
       pc.ontrack = (event) => {
-        console.log('Received remote track from:', targetUserId);
         setRemoteStreams(prev => ({
           ...prev,
           [targetUserId]: event.streams[0]
         }));
+      };
+
+      // Renegotiate whenever tracks change after the initial connection is
+      // up — e.g. someone turns their camera on after joining with it off.
+      // Without this, addTrack() only adds the track locally; the remote
+      // side never learns about it and its ontrack never fires.
+      pc.onnegotiationneeded = async () => {
+        if (isInitialNegotiation) return;
+        try {
+          const newOffer = await pc.createOffer();
+          await pc.setLocalDescription(newOffer);
+          socket.emit('webrtc-offer', {
+            roomId: meetingId,
+            targetUserId,
+            offer: pc.localDescription
+          });
+        } catch (err) {
+          console.error('Error renegotiating connection:', err);
+        }
       };
 
       // Create and send offer with audio codec preferences
@@ -521,6 +531,8 @@ const VideoMeetingRoom = () => {
         offer: modifiedOffer
       });
 
+      isInitialNegotiation = false;
+
       return pc;
     } catch (err) {
       console.error('Error creating peer connection:', err);
@@ -530,8 +542,10 @@ const VideoMeetingRoom = () => {
   const handleOffer = async (fromUserId, offer) => {
     try {
       let pc = peerConnectionsRef.current[fromUserId];
+      let isNewConnection = false;
 
       if (!pc) {
+        isNewConnection = true;
         pc = new RTCPeerConnection(iceServers);
         peerConnectionsRef.current[fromUserId] = pc;
 
@@ -555,12 +569,32 @@ const VideoMeetingRoom = () => {
 
         // Handle remote stream
         pc.ontrack = (event) => {
-          console.log('Received remote track from:', fromUserId);
           setRemoteStreams(prev => ({
             ...prev,
             [fromUserId]: event.streams[0]
           }));
         };
+
+        // Same reasoning as createPeerConnection: ignore the
+        // negotiationneeded event fired by the initial addTrack calls
+        // (the offer/answer we're already handling below covers that),
+        // but renegotiate for any tracks added after this point.
+        let isInitialNegotiation = true;
+        pc.onnegotiationneeded = async () => {
+          if (isInitialNegotiation) return;
+          try {
+            const newOffer = await pc.createOffer();
+            await pc.setLocalDescription(newOffer);
+            socket.emit('webrtc-offer', {
+              roomId: meetingId,
+              targetUserId: fromUserId,
+              offer: pc.localDescription
+            });
+          } catch (err) {
+            console.error('Error renegotiating connection:', err);
+          }
+        };
+        pc._markInitialNegotiationDone = () => { isInitialNegotiation = false; };
       }
 
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
@@ -582,6 +616,8 @@ const VideoMeetingRoom = () => {
         targetUserId: fromUserId,
         answer: modifiedAnswer
       });
+
+      if (isNewConnection) pc._markInitialNegotiationDone();
 
     } catch (err) {
       console.error('Error handling offer:', err);
@@ -612,16 +648,12 @@ const VideoMeetingRoom = () => {
 
   // Media Controls
   const handleToggleMute = (forceMute = null) => {
-    console.log('Toggle mute called, current state:', isMuted);
-    console.log('Socket connected:', socket.connected);
     if (localStreamRef.current) {
       const audioTrack = localStreamRef.current.getAudioTracks()[0];
-      console.log('Audio track:', audioTrack);
       if (audioTrack) {
         const newMutedState = forceMute !== null ? forceMute : !isMuted;
         audioTrack.enabled = !newMutedState;
         setIsMuted(newMutedState);
-        console.log('New muted state:', newMutedState, 'Track enabled:', audioTrack.enabled);
 
         if (socket.connected) {
           socket.emit('toggle-mute', {
@@ -629,7 +661,6 @@ const VideoMeetingRoom = () => {
             userId: auth.currentUser?.uid,
             isMuted: newMutedState
           });
-          console.log('Emitted toggle-mute event');
         } else {
           console.error('Socket not connected, cannot emit toggle-mute');
         }
@@ -739,8 +770,6 @@ const VideoMeetingRoom = () => {
   // Chat Functions
   const handleSendMessage = (e) => {
     e.preventDefault();
-    console.log('Sending message:', messageInput);
-    console.log('Socket connected:', socket.connected);
 
     if (chatLocked && !isHost && selectedRecipient !== 'everyone') {
       alert('Chat is locked. You can only send messages to everyone.');
@@ -756,18 +785,14 @@ const VideoMeetingRoom = () => {
         messageType: selectedRecipient === 'everyone' ? 'public' : 'private',
         recipientId: selectedRecipient === 'everyone' ? null : selectedRecipient
       };
-      console.log('Message data:', messageData);
 
       if (socket.connected) {
         socket.emit('send-message', messageData);
-        console.log('Message emitted successfully');
         setMessageInput('');
       } else {
         console.error('Socket not connected, cannot send message');
         alert('Not connected to server. Please refresh and try again.');
       }
-    } else {
-      console.log('Message is empty, not sending');
     }
   };
 
@@ -896,8 +921,6 @@ const VideoMeetingRoom = () => {
     const isRaised = raisedHands.includes(userId);
     const newState = !isRaised;
 
-    console.log('Raise hand clicked! Current state:', isRaised, 'New state:', newState);
-    console.log('User ID:', userId, 'Meeting ID:', meetingId);
 
     // Update local state immediately for instant feedback
     setRaisedHands(prev => {
@@ -908,7 +931,6 @@ const VideoMeetingRoom = () => {
       }
     });
 
-    console.log('Socket connected?', socket.connected);
 
     // Emit to server
     socket.emit('raise-hand', {
@@ -917,7 +939,6 @@ const VideoMeetingRoom = () => {
       raised: newState
     });
 
-    console.log('Raise hand event emitted to server');
   };
 
   // Device Selection
@@ -1072,6 +1093,30 @@ const VideoMeetingRoom = () => {
                 Back to Course
               </button>
             </>
+          ) : meeting?.isActive ? (
+            <>
+              {isHost ? (
+                <>
+                  <p className="text-gray-300 mb-6">Your meeting is live. Rejoin it below.</p>
+                  <button
+                    onClick={handleJoinMeeting}
+                    className="w-full px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-semibold transition-colors"
+                  >
+                    Rejoin Meeting
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="text-gray-300 mb-6">The host has started this meeting. You can join now.</p>
+                  <button
+                    onClick={handleJoinMeeting}
+                    className="w-full px-6 py-3 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-semibold transition-colors"
+                  >
+                    Join Meeting
+                  </button>
+                </>
+              )}
+            </>
           ) : isHost ? (
             <>
               {isMissed ? (
@@ -1108,30 +1153,6 @@ const VideoMeetingRoom = () => {
                     ) : (
                       'Start Meeting'
                     )}
-                  </button>
-                </>
-              )}
-            </>
-          ) : meeting?.isActive ? (
-            <>
-              {isHost ? (
-                <>
-                  <p className="text-gray-300 mb-6">Your meeting is live. Rejoin it below.</p>
-                  <button
-                    onClick={handleJoinMeeting}
-                    className="w-full px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-semibold transition-colors"
-                  >
-                    Rejoin Meeting
-                  </button>
-                </>
-              ) : (
-                <>
-                  <p className="text-gray-300 mb-6">The host has started this meeting. You can join now.</p>
-                  <button
-                    onClick={handleJoinMeeting}
-                    className="w-full px-6 py-3 bg-sky-600 hover:bg-sky-500 text-white rounded-xl font-semibold transition-colors"
-                  >
-                    Join Meeting
                   </button>
                 </>
               )}
@@ -1523,10 +1544,10 @@ const VideoMeetingRoom = () => {
       </div>
 
       {/* Bottom Controls */}
-      <div className="bg-gray-800 px-2 sm:px-6 py-3 sm:py-4 border-t border-gray-700 relative flex-shrink-0 overflow-x-auto">
+      <div className="bg-gray-800 px-2 sm:px-6 py-3 sm:py-4 border-t border-gray-700 relative flex-shrink-0">
         {/* Reactions Panel */}
         {showReactions && (
-          <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-700 rounded-lg p-3 flex gap-2 shadow-lg">
+          <div className="absolute bottom-full mb-2 left-1/2 transform -translate-x-1/2 bg-gray-700 rounded-lg p-3 flex gap-2 shadow-lg z-20">
             <button onClick={() => handleSendReaction('👍')} className="text-3xl hover:scale-110 transition-transform">👍</button>
             <button onClick={() => handleSendReaction('❤️')} className="text-3xl hover:scale-110 transition-transform">❤️</button>
             <button onClick={() => handleSendReaction('😂')} className="text-3xl hover:scale-110 transition-transform">😂</button>
@@ -1537,7 +1558,7 @@ const VideoMeetingRoom = () => {
 
         {/* Settings Panel - Host Permissions Only */}
         {showSettings && isHost && (
-          <div className="absolute bottom-full right-2 sm:right-6 mb-2 bg-gray-700 rounded-lg p-4 w-[calc(100vw-1rem)] max-w-72 shadow-lg">
+          <div className="absolute bottom-full right-2 sm:right-6 mb-2 bg-gray-700 rounded-lg p-4 w-[calc(100vw-1rem)] max-w-72 shadow-lg z-20">
             <h3 className="text-white font-medium mb-3">Participant Permissions</h3>
             <div className="space-y-2">
               <label className="flex items-center gap-2 text-sm text-gray-300">
@@ -1571,7 +1592,7 @@ const VideoMeetingRoom = () => {
           </div>
         )}
 
-        <div className="flex items-center justify-start sm:justify-center gap-2 sm:gap-3 w-full min-w-max sm:min-w-0 px-1">
+        <div className="flex items-center justify-start sm:justify-center gap-2 sm:gap-3 w-full min-w-max sm:min-w-0 px-1 overflow-x-auto">
           {/* Microphone with Device Menu */}
           <div className="relative group">
             <button
@@ -1710,9 +1731,12 @@ const VideoMeetingRoom = () => {
 
           {/* Settings */}
           <button
-            onClick={() => setShowSettings(!showSettings)}
-            className="p-3 sm:p-4 rounded-full bg-gray-700 hover:bg-gray-600 text-white transition-colors"
-            title="Settings"
+            onClick={() => isHost && setShowSettings(!showSettings)}
+            disabled={!isHost}
+            className={`p-3 sm:p-4 rounded-full text-white transition-colors ${
+              isHost ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-700/50 cursor-not-allowed opacity-50'
+            }`}
+            title={isHost ? 'Settings' : 'Only the host can change settings'}
           >
             <Settings className="w-5 h-5" />
           </button>

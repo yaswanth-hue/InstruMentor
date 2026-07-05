@@ -141,24 +141,18 @@ const unfollowUser = async (currentUserId, targetUserId) => {
 
 // Posts helper functions
 const createPost = async (postData, imageFile = null) => {
-  console.log('createPost called with imageFile:', imageFile ? imageFile.name : 'NO IMAGE');
   let imageUrl = null;
 
   // Convert image to base64 if provided
   if (imageFile) {
-    console.log('Converting post image to base64...');
     imageUrl = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result);
       reader.onerror = reject;
       reader.readAsDataURL(imageFile);
     });
-    console.log('Post image converted successfully to base64');
-  } else {
-    console.log('No image file provided for this post');
   }
 
-  console.log('Creating post document with imageUrl:', imageUrl ? 'BASE64_DATA' : null);
   const docRef = await addDoc(collection(db, "posts"), {
     ...postData,
     imageUrl,
@@ -166,7 +160,6 @@ const createPost = async (postData, imageFile = null) => {
     likes: [],
     comments: []
   });
-  console.log('Post created with ID:', docRef.id);
   return docRef.id;
 };
 
@@ -211,7 +204,6 @@ const addComment = async (postId, commentData) => {
     });
   } catch (error) {
     // If commentCount field doesn't exist, it's okay
-    console.log("Could not update comment count:", error);
   }
 };
 
@@ -323,7 +315,6 @@ const sendMessageRequest = async (messageData) => {
     const docRef = await addDoc(collection(db, "messages"), {
       ...messageData,
       status: hasAccepted ? "accepted" : "pending",
-      read: false,
       timestamp: serverTimestamp(),
     });
     return docRef.id;
@@ -331,23 +322,10 @@ const sendMessageRequest = async (messageData) => {
     const docRef = await addDoc(collection(db, "messages"), {
       ...messageData,
       status: "pending",
-      read: false,
       timestamp: serverTimestamp(),
     });
     return docRef.id;
   }
-};
-
-// Marks a batch of message docs as read. Pass the ids of the *unread*
-// messages you already have loaded client-side to avoid an extra query.
-const markMessagesRead = async (messageIds) => {
-  const ids = (messageIds || []).filter(Boolean);
-  if (ids.length === 0) return;
-  const batch = writeBatch(db);
-  ids.forEach((id) => {
-    batch.update(doc(db, "messages", id), { read: true });
-  });
-  await batch.commit();
 };
 
 const acceptMessageRequest = async (messageId) => {
@@ -721,7 +699,6 @@ export {
   getFeedPosts,
   resolveTaggedUsersByMentions,
   sendMessageRequest,
-  markMessagesRead,
   acceptMessageRequest,
   rejectMessageRequest,
   getMessages,

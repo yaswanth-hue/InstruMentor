@@ -318,7 +318,7 @@ const CoursesPage = () => {
   };
 
   const list = useMemo(() => {
-    if (tab === 'explore') return courses.filter(c => c.creatorId !== userId);
+    if (tab === 'explore') return courses.filter(c => c.creatorId !== userId && !isEnrolledFn(c.id));
     if (tab === 'my')      return myCourses;
     return enrolled;
   }, [tab, courses, myCourses, enrolled, userId]);

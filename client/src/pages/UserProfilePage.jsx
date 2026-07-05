@@ -19,6 +19,9 @@ import {
   getEnrolledCourses,
   createUserProfile,
   deletePost,
+  likePost,
+  unlikePost,
+  addComment,
 } from '../firebase';
 import {
   Camera,
@@ -41,7 +44,8 @@ import {
   Video,
   Sparkles,
   Settings,
-  PlusSquare
+  PlusSquare,
+  Send
 } from 'lucide-react';
 import MagneticCard from '../components/MagneticCard';
 import LazyImage from '../components/LazyImage';
@@ -98,7 +102,7 @@ const ProfilePage = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("media"); // media, courses
   const [courseSubTab, setCourseSubTab] = useState("created"); // created or enrolled
-  const [mediaTab, setMediaTab] = useState("posts"); // posts, vibes, tagged
+  const [mediaTab, setMediaTab] = useState("posts"); // posts, reels, tagged
 
   // Profile editing states
   const [uploading, setUploading] = useState(false);
@@ -111,6 +115,8 @@ const ProfilePage = () => {
   const [showFollowingModal, setShowFollowingModal] = useState(false);
   const [followersList, setFollowersList] = useState([]);
   const [followingList, setFollowingList] = useState([]);
+  const [followListActionId, setFollowListActionId] = useState(null);
+  const [followListError, setFollowListError] = useState('');
 
   // Image viewer modal states
   const [showProfilePicModal, setShowProfilePicModal] = useState(false);
@@ -140,6 +146,8 @@ const ProfilePage = () => {
   const [viewerPosts, setViewerPosts] = useState([]);
   const [showLikesModal, setShowLikesModal] = useState(false);
   const [likesList, setLikesList] = useState([]);
+  const [viewerCommentText, setViewerCommentText] = useState('');
+  const [submittingViewerComment, setSubmittingViewerComment] = useState(false);
   const postViewerRef = useRef(null);
   const profileContentRef = useRef(null);
   const avatarParallaxRef = useRef(null);
@@ -584,6 +592,55 @@ const ProfilePage = () => {
     }
   };
 
+  // Removes someone from MY followers (only relevant on my own profile).
+  // Uses the existing unfollowUser helper with the ids swapped: it's the
+  // same relationship edge, just removed from the other person's side.
+  const handleRemoveFollower = async (follower) => {
+    if (!follower?.id || followListActionId) return;
+    setFollowListError('');
+    setFollowListActionId(follower.id);
+    try {
+      await unfollowUser(follower.id, currentUserId);
+      setFollowersList((prev) => prev.filter((f) => f.id !== follower.id));
+      setUserProfile((prev) => ({
+        ...(prev || defaultProfile),
+        followers: (prev?.followers || []).filter((id) => id !== follower.id),
+      }));
+    } catch (error) {
+      console.error('Error removing follower:', error);
+      setFollowListError(`Couldn't remove ${follower.displayName || 'this follower'}. Please try again.`);
+    } finally {
+      setFollowListActionId(null);
+    }
+  };
+
+  // Unfollows someone from MY following list (only relevant on my own profile).
+  const handleUnfollowFromList = async (person) => {
+    if (!person?.id || followListActionId) return;
+    setFollowListError('');
+    setFollowListActionId(person.id);
+    try {
+      await unfollowUser(currentUserId, person.id);
+      setFollowingList((prev) => prev.filter((f) => f.id !== person.id));
+      setUserProfile((prev) => ({
+        ...(prev || defaultProfile),
+        following: (prev?.following || []).filter((id) => id !== person.id),
+      }));
+      if (person.id === profileUserId) {
+        // Unfollowed the very profile currently being viewed — reflect it right away.
+        setUserProfile((prev) => ({
+          ...(prev || defaultProfile),
+          followers: (prev?.followers || []).filter((id) => id !== currentUserId),
+        }));
+      }
+    } catch (error) {
+      console.error('Error unfollowing:', error);
+      setFollowListError(`Couldn't unfollow ${person.displayName || 'this person'}. Please try again.`);
+    } finally {
+      setFollowListActionId(null);
+    }
+  };
+
   const loadLikesList = async (post) => {
     if (!post?.likes || post.likes.length === 0) {
       setLikesList([]);
@@ -600,6 +657,70 @@ const ProfilePage = () => {
       setLikesList(likesData.filter(Boolean));
     } catch (error) {
       console.error('Error loading likes:', error);
+    }
+  };
+
+  const handleLikeViewerPost = async (postId) => {
+    if (!currentUserId || !postId) return;
+
+    const post = viewerPosts.find((p) => p.id === postId);
+    const isLiked = post?.likes?.includes(currentUserId);
+
+    try {
+      if (isLiked) {
+        await unlikePost(postId, currentUserId);
+      } else {
+        await likePost(postId, currentUserId);
+      }
+
+      const updateLikes = (p) =>
+        p.id === postId
+          ? {
+              ...p,
+              likes: isLiked
+                ? (p.likes || []).filter((id) => id !== currentUserId)
+                : [...(p.likes || []), currentUserId],
+            }
+          : p;
+
+      setViewerPosts((prev) => prev.map(updateLikes));
+      setPosts((prev) => prev.map(updateLikes));
+    } catch (error) {
+      console.error('Error liking/unliking post:', error);
+    }
+  };
+
+  const handleAddViewerComment = async (post) => {
+    if (!viewerCommentText.trim() || !post || !currentUserId) return;
+
+    try {
+      setSubmittingViewerComment(true);
+      const newComment = {
+        userId: currentUserId,
+        userName: userProfile?.displayName || 'User',
+        userProfilePic: userProfile?.profilePic || '',
+        text: viewerCommentText,
+        timestamp: new Date().toISOString(),
+      };
+
+      await addComment(post.id, {
+        userId: newComment.userId,
+        userName: newComment.userName,
+        userProfilePic: newComment.userProfilePic,
+        text: newComment.text,
+      });
+
+      const appendComment = (p) =>
+        p.id === post.id ? { ...p, comments: [...(p.comments || []), newComment] } : p;
+
+      setViewerPosts((prev) => prev.map(appendComment));
+      setPosts((prev) => prev.map(appendComment));
+      setViewerCommentText('');
+    } catch (error) {
+      console.error('Error adding comment:', error);
+      alert('Failed to add comment. Please try again.');
+    } finally {
+      setSubmittingViewerComment(false);
     }
   };
 
@@ -621,12 +742,12 @@ const ProfilePage = () => {
 
   if (!userProfile && !loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 flex items-center justify-center" style={{width: '100%', maxWidth: 'none'}}>
+      <div className="min-h-screen bg-gradient-to-b from-zinc-950 via-neutral-950 to-zinc-950 flex items-center justify-center" style={{width: '100%', maxWidth: 'none'}}>
         <div className="text-center">
-          <h2 className="text-2xl font-bold text-gray-700 mb-2">Profile not found</h2>
+          <h2 className="text-2xl font-bold text-zinc-100 mb-2">Profile not found</h2>
           <button
             onClick={() => navigate('/home')}
-            className="text-purple-600 hover:text-purple-700"
+            className="text-sky-300 hover:text-sky-200"
           >
             Back to Feed
           </button>
@@ -790,6 +911,64 @@ const ProfilePage = () => {
               )}
             </aside>
 
+            {/* Top: Compact profile photo (mobile/tablet only) */}
+            <div className="lg:hidden mb-6">
+              <div className="rounded-3xl overflow-hidden border border-white/10 bg-zinc-900/40 shadow-2xl shadow-black/50">
+                <div className="relative h-56 sm:h-64">
+                  <button
+                    type="button"
+                    onClick={handleProfilePicClick}
+                    className="absolute inset-0 h-full w-full cursor-pointer"
+                    aria-label="Open profile picture"
+                  >
+                    {userProfile?.profilePic ? (
+                      <img
+                        src={userProfile.profilePic}
+                        alt="Profile"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="h-full w-full bg-gradient-to-br from-amber-400 via-pink-500 to-indigo-500 flex items-center justify-center">
+                        <User className="w-20 h-20 text-white/90" />
+                      </div>
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/0 to-black/10" />
+                    {uploading && (
+                      <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                        <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin" />
+                      </div>
+                    )}
+                  </button>
+
+                  {/* quick identity + actions pinned on photo */}
+                  <div className="pointer-events-none absolute bottom-0 left-0 right-0 p-4">
+                    <div className="flex items-end justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="text-lg font-semibold text-white truncate">
+                          {userProfile?.displayName || "Music Enthusiast"}
+                        </p>
+                        <p className="mt-0.5 text-xs text-white/70 truncate">{userProfile?.email}</p>
+                      </div>
+
+                      {isOwnProfile && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            fileInputRef.current?.click();
+                          }}
+                          className="pointer-events-auto h-10 w-10 rounded-2xl border border-white/15 bg-white/10 hover:bg-white/15 transition-colors inline-flex items-center justify-center"
+                          aria-label="Change profile picture"
+                        >
+                          <Camera className="h-4 w-4 text-white" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Right: Profile content */}
             <section
               className="lg:col-span-7 lg:pr-2 profile-content"
@@ -921,6 +1100,7 @@ const ProfilePage = () => {
               </div>
               <button
                 onClick={() => {
+                  setFollowListError('');
                   setShowFollowersModal(true);
                   loadFollowersList();
                 }}
@@ -931,6 +1111,7 @@ const ProfilePage = () => {
               </button>
               <button
                 onClick={() => {
+                  setFollowListError('');
                   setShowFollowingModal(true);
                   loadFollowingList();
                 }}
@@ -952,7 +1133,7 @@ const ProfilePage = () => {
                   </div>
                   <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-2">
                     <p className="text-lg font-bold text-slate-100">{reelPosts.length}</p>
-                    <p className="text-[11px] text-slate-400">Vibes</p>
+                    <p className="text-[11px] text-slate-400">Reels</p>
                   </div>
                   <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-2">
                     <p className="text-lg font-bold text-slate-100">{taggedPosts.length}</p>
@@ -970,6 +1151,7 @@ const ProfilePage = () => {
                     onClick={() => {
                       setActiveTab('courses');
                       setCourseSubTab('enrolled');
+                      document.getElementById('profile-tabs-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                     }}
                     className="mt-1 w-full rounded-xl border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700 transition-colors"
                   >
@@ -1024,7 +1206,7 @@ const ProfilePage = () => {
         </div>
 
       {/* Tabs Section */}
-      <div className="w-full px-4 sm:px-6 lg:px-8 mt-6 sm:mt-8 max-w-full" style={{width: '100%', maxWidth: 'none'}}>
+      <div id="profile-tabs-section" className="w-full px-4 sm:px-6 lg:px-8 mt-6 sm:mt-8 max-w-full" style={{width: '100%', maxWidth: 'none'}}>
         <div className="mx-auto flex w-full max-w-3xl justify-center gap-2 rounded-2xl border border-slate-700 bg-slate-900/70 p-2">
           <button
             onClick={() => setActiveTab('media')}
@@ -1068,12 +1250,12 @@ const ProfilePage = () => {
               Posts
             </button>
             <button
-              onClick={() => setMediaTab('vibes')}
+              onClick={() => setMediaTab('reels')}
               className={`flex-1 rounded-xl px-4 py-2 text-sm font-semibold transition-colors ${
-                mediaTab === 'vibes' ? 'bg-slate-800 text-sky-300' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+                mediaTab === 'reels' ? 'bg-slate-800 text-sky-300' : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
               }`}
             >
-              Vibes
+              Reels
             </button>
             <button
               onClick={() => setMediaTab('tagged')}
@@ -1100,19 +1282,19 @@ const ProfilePage = () => {
               // Show private account message if can't view
               if (!isOwnProfile && isPrivateAccount && !isFollowingUser) {
                 return (
-                  <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-xl border border-indigo-100 p-12 text-center">
-                    <div className="w-24 h-24 bg-gradient-to-br from-gray-100 to-gray-200 rounded-full flex items-center justify-center mx-auto mb-6">
-                      <User className="w-12 h-12 text-gray-400" />
+                  <div className="bg-zinc-900/70 backdrop-blur-2xl rounded-3xl shadow-xl border border-sky-300/20 p-12 text-center">
+                    <div className="w-24 h-24 bg-zinc-800 border border-sky-300/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                      <User className="w-12 h-12 text-sky-200" />
                     </div>
-                    <h3 className="text-3xl font-bold text-gray-800 mb-3">
+                    <h3 className="text-3xl font-bold text-zinc-100 mb-3">
                       This Account is Private
                     </h3>
-                    <p className="text-gray-600 mb-8 text-lg">
+                    <p className="text-slate-400 mb-8 text-lg">
                       Follow this account to see their posts, vibes, and streams.
                     </p>
                     <button
                       onClick={handleFollow}
-                      className="px-8 py-4 bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 text-white rounded-2xl font-bold hover:shadow-xl transition-all hover:scale-105 flex items-center justify-center gap-2 mx-auto"
+                      className="px-8 py-4 bg-sky-600 hover:bg-sky-500 text-white rounded-2xl font-bold shadow-lg transition-all hover:scale-105 flex items-center justify-center gap-2 mx-auto"
                     >
                       <UserPlus className="w-5 h-5" />
                       Follow to View Content
@@ -1126,7 +1308,7 @@ const ProfilePage = () => {
               return loading ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                   {[1,2,3,4,5,6].map((i) => (
-                    <div key={i} className="aspect-square rounded-2xl bg-gradient-to-br from-indigo-100 via-purple-100 to-pink-100 animate-pulse"></div>
+                    <div key={i} className="aspect-square rounded-2xl bg-white/10 animate-pulse"></div>
                   ))}
                 </div>
               ) : filteredPosts.length === 0 ? (
@@ -1183,7 +1365,7 @@ const ProfilePage = () => {
                       />
                     ) : (
                       <div
-                        className="w-full h-full bg-gradient-to-br from-indigo-200 to-purple-200 flex items-center justify-center"
+                        className="w-full h-full bg-slate-800 flex items-center justify-center"
                         onClick={() => {
                           setViewerPosts(filteredPosts);
                           setCurrentPostIndex(index);
@@ -1195,7 +1377,7 @@ const ProfilePage = () => {
                     )}
 
                     {/* Hover Overlay */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
+                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
                       <div className="text-white flex items-center gap-6 text-sm font-semibold w-full justify-center">
                         <div className="flex items-center gap-2">
                           <Heart className="w-5 h-5 fill-white" />
@@ -1216,8 +1398,8 @@ const ProfilePage = () => {
           </div>
         )}
 
-        {/* Vibes Tab */}
-        {activeTab === "media" && mediaTab === "vibes" && (
+        {/* Reels Tab */}
+        {activeTab === "media" && mediaTab === "reels" && (
           <div>
             {(() => {
               const isPrivateAccount = userProfile?.isPrivate === true;
@@ -1229,13 +1411,13 @@ const ProfilePage = () => {
                       <User className="h-12 w-12 text-slate-400" />
                     </div>
                     <h3 className="mb-3 text-3xl font-bold text-slate-100">This Account is Private</h3>
-                    <p className="mb-8 text-lg text-slate-400">Follow this account to see their vibes.</p>
+                    <p className="mb-8 text-lg text-slate-400">Follow this account to see their reels.</p>
                     <button
                       onClick={handleFollow}
                       className="mx-auto inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-8 py-4 font-bold text-white hover:bg-sky-500"
                     >
                       <UserPlus className="w-5 h-5" />
-                      Follow to View Vibes
+                      Follow to View Reels
                     </button>
                   </div>
                 );
@@ -1244,7 +1426,7 @@ const ProfilePage = () => {
               const reelPostsLocal = reelPosts;
 
               if (loading) {
-                return <LoadingSpinner fullScreen={false} size="sm" message="Loading vibes…" />;
+                return <LoadingSpinner fullScreen={false} size="sm" message="Loading reels…" />;
               }
 
               if (reelPostsLocal.length === 0) {
@@ -1254,10 +1436,10 @@ const ProfilePage = () => {
                       <Film className="w-10 h-10 text-slate-300" />
                     </div>
                     <h3 className="mb-3 text-2xl font-bold text-slate-100">
-                      {isOwnProfile ? "You haven't posted vibes yet" : "No vibes yet"}
+                      {isOwnProfile ? "You haven't posted reels yet" : "No reels yet"}
                     </h3>
                     <p className="mb-8 text-slate-400">
-                      {isOwnProfile ? "Share a vibe to appear here." : "This user has not shared vibes yet."}
+                      {isOwnProfile ? "Share a vibe to appear here." : "This user has not shared reels yet."}
                     </p>
                     {isOwnProfile && (
                       <button
@@ -1302,7 +1484,7 @@ const ProfilePage = () => {
                         </div>
                       )}
 
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
+                      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
                         <div className="text-white flex items-center gap-6 text-sm font-semibold w-full justify-center">
                           <div className="flex items-center gap-2">
                             <Heart className="w-5 h-5 fill-white" />
@@ -1415,19 +1597,19 @@ const ProfilePage = () => {
               // Show private account message if can't view
               if (!isOwnProfile && isPrivateAccount && !isFollowingUser) {
                 return (
-                  <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-xl border border-indigo-100 p-12 text-center">
-                    <div className="w-24 h-24 bg-gradient-to-br from-gray-100 to-gray-200 rounded-full flex items-center justify-center mx-auto mb-6">
-                      <User className="w-12 h-12 text-gray-400" />
+                  <div className="bg-zinc-900/70 backdrop-blur-2xl rounded-3xl shadow-xl border border-sky-300/20 p-12 text-center">
+                    <div className="w-24 h-24 bg-zinc-800 border border-sky-300/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                      <User className="w-12 h-12 text-sky-200" />
                     </div>
-                    <h3 className="text-3xl font-bold text-gray-800 mb-3">
+                    <h3 className="text-3xl font-bold text-zinc-100 mb-3">
                       This Account is Private
                     </h3>
-                    <p className="text-gray-600 mb-8 text-lg">
+                    <p className="text-slate-400 mb-8 text-lg">
                       Follow this account to see their courses.
                     </p>
                     <button
                       onClick={handleFollow}
-                      className="px-8 py-4 bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 text-white rounded-2xl font-bold hover:shadow-xl transition-all hover:scale-105 flex items-center justify-center gap-2 mx-auto"
+                      className="px-8 py-4 bg-sky-600 hover:bg-sky-500 text-white rounded-2xl font-bold shadow-lg transition-all hover:scale-105 flex items-center justify-center gap-2 mx-auto"
                     >
                       <UserPlus className="w-5 h-5" />
                       Follow to View Content
@@ -1590,60 +1772,77 @@ const ProfilePage = () => {
       {/* Followers Modal */}
       {showFollowersModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-hidden border border-indigo-200">
+          <div className="bg-slate-900/95 backdrop-blur-xl rounded-3xl shadow-2xl shadow-black/40 w-full max-w-md max-h-[80vh] overflow-hidden border border-slate-800">
             {/* Modal Header */}
-            <div className="sticky top-0 bg-gradient-to-r from-indigo-50 via-purple-50 to-pink-50 border-b border-indigo-100 px-6 py-5 flex items-center justify-between">
-              <h2 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
-                Followers
-              </h2>
+            <div className="sticky top-0 bg-slate-900/95 backdrop-blur-xl border-b border-slate-800 px-6 py-5 flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-slate-100">Followers</h2>
               <button
                 onClick={() => setShowFollowersModal(false)}
-                className="p-2 hover:bg-indigo-100 rounded-2xl transition-all"
+                className="p-2 rounded-2xl border border-slate-700 bg-slate-900 hover:bg-slate-800 transition-colors"
               >
-                <X className="w-6 h-6 text-gray-600" />
+                <X className="w-5 h-5 text-slate-300" />
               </button>
             </div>
 
             {/* Followers List */}
             <div className="p-6 overflow-y-auto max-h-[calc(80vh-80px)]">
+              {followListError && (
+                <div className="mb-4 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300">
+                  {followListError}
+                </div>
+              )}
               {followersList.length === 0 ? (
                 <div className="text-center py-12">
-                  <Users className="w-16 h-16 text-indigo-300 mx-auto mb-4" />
-                  <p className="text-gray-500 font-medium">No followers yet</p>
+                  <Users className="w-16 h-16 text-slate-700 mx-auto mb-4" />
+                  <p className="text-slate-400 font-medium">No followers yet</p>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {followersList.map((follower) => (
-                    <button
+                    <div
                       key={follower.id}
-                      onClick={() => {
-                        setShowFollowersModal(false);
-                        navigate(`/user-profile/${follower.id}`);
-                      }}
-                      className="w-full flex items-center gap-4 p-4 bg-white/80 backdrop-blur-xl rounded-2xl border border-indigo-100 hover:shadow-lg hover:border-indigo-300 transition-all group"
+                      className="w-full flex items-center gap-4 p-4 bg-slate-800/50 rounded-2xl border border-slate-700 hover:border-sky-500/40 hover:bg-slate-800 transition-all group"
                     >
-                      <div className="w-14 h-14 rounded-2xl overflow-hidden ring-2 ring-indigo-200 group-hover:ring-indigo-400 transition-all flex-shrink-0">
-                        {follower.profilePic ? (
-                          <img
-                            src={follower.profilePic}
-                            alt={follower.displayName}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full bg-gradient-to-br from-indigo-400 to-pink-400 flex items-center justify-center">
-                            <User className="w-7 h-7 text-white" />
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex-grow text-left">
-                        <h4 className="font-bold text-gray-900 text-lg group-hover:text-indigo-600 transition-colors">
-                          {follower.displayName || 'Music Enthusiast'}
-                        </h4>
-                        <p className="text-sm text-indigo-400 font-medium">
-                          {follower.followers?.length || 0} followers
-                        </p>
-                      </div>
-                    </button>
+                      <button
+                        onClick={() => {
+                          setShowFollowersModal(false);
+                          navigate(`/user-profile/${follower.id}`);
+                        }}
+                        className="flex items-center gap-4 flex-grow text-left min-w-0"
+                      >
+                        <div className="w-14 h-14 rounded-2xl overflow-hidden ring-2 ring-slate-700 group-hover:ring-sky-500/50 transition-all flex-shrink-0 bg-slate-800">
+                          {follower.profilePic ? (
+                            <img
+                              src={follower.profilePic}
+                              alt={follower.displayName}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <User className="w-7 h-7 text-slate-400" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-grow text-left min-w-0">
+                          <h4 className="font-bold text-slate-100 text-lg group-hover:text-sky-300 transition-colors truncate">
+                            {follower.displayName || 'Music Enthusiast'}
+                          </h4>
+                          <p className="text-sm text-slate-400 font-medium">
+                            {follower.followers?.length || 0} followers
+                          </p>
+                        </div>
+                      </button>
+                      {isOwnProfile && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveFollower(follower)}
+                          disabled={followListActionId === follower.id}
+                          className="shrink-0 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-red-500/10 hover:border-red-400/40 hover:text-red-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {followListActionId === follower.id ? 'Removing…' : 'Remove'}
+                        </button>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}
@@ -1655,60 +1854,77 @@ const ProfilePage = () => {
       {/* Following Modal */}
       {showFollowingModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-hidden border border-indigo-200">
+          <div className="bg-slate-900/95 backdrop-blur-xl rounded-3xl shadow-2xl shadow-black/40 w-full max-w-md max-h-[80vh] overflow-hidden border border-slate-800">
             {/* Modal Header */}
-            <div className="sticky top-0 bg-gradient-to-r from-indigo-50 via-purple-50 to-pink-50 border-b border-indigo-100 px-6 py-5 flex items-center justify-between">
-              <h2 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
-                Following
-              </h2>
+            <div className="sticky top-0 bg-slate-900/95 backdrop-blur-xl border-b border-slate-800 px-6 py-5 flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-slate-100">Following</h2>
               <button
                 onClick={() => setShowFollowingModal(false)}
-                className="p-2 hover:bg-indigo-100 rounded-2xl transition-all"
+                className="p-2 rounded-2xl border border-slate-700 bg-slate-900 hover:bg-slate-800 transition-colors"
               >
-                <X className="w-6 h-6 text-gray-600" />
+                <X className="w-5 h-5 text-slate-300" />
               </button>
             </div>
 
             {/* Following List */}
             <div className="p-6 overflow-y-auto max-h-[calc(80vh-80px)]">
+              {followListError && (
+                <div className="mb-4 rounded-2xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-300">
+                  {followListError}
+                </div>
+              )}
               {followingList.length === 0 ? (
                 <div className="text-center py-12">
-                  <Users className="w-16 h-16 text-indigo-300 mx-auto mb-4" />
-                  <p className="text-gray-500 font-medium">Not following anyone yet</p>
+                  <Users className="w-16 h-16 text-slate-700 mx-auto mb-4" />
+                  <p className="text-slate-400 font-medium">Not following anyone yet</p>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {followingList.map((following) => (
-                    <button
+                    <div
                       key={following.id}
-                      onClick={() => {
-                        setShowFollowingModal(false);
-                        navigate(`/user-profile/${following.id}`);
-                      }}
-                      className="w-full flex items-center gap-4 p-4 bg-white/80 backdrop-blur-xl rounded-2xl border border-indigo-100 hover:shadow-lg hover:border-indigo-300 transition-all group"
+                      className="w-full flex items-center gap-4 p-4 bg-slate-800/50 rounded-2xl border border-slate-700 hover:border-sky-500/40 hover:bg-slate-800 transition-all group"
                     >
-                      <div className="w-14 h-14 rounded-2xl overflow-hidden ring-2 ring-indigo-200 group-hover:ring-indigo-400 transition-all flex-shrink-0">
-                        {following.profilePic ? (
-                          <img
-                            src={following.profilePic}
-                            alt={following.displayName}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <div className="w-full h-full bg-gradient-to-br from-indigo-400 to-pink-400 flex items-center justify-center">
-                            <User className="w-7 h-7 text-white" />
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex-grow text-left">
-                        <h4 className="font-bold text-gray-900 text-lg group-hover:text-indigo-600 transition-colors">
-                          {following.displayName || 'Music Enthusiast'}
-                        </h4>
-                        <p className="text-sm text-indigo-400 font-medium">
-                          {following.followers?.length || 0} followers
-                        </p>
-                      </div>
-                    </button>
+                      <button
+                        onClick={() => {
+                          setShowFollowingModal(false);
+                          navigate(`/user-profile/${following.id}`);
+                        }}
+                        className="flex items-center gap-4 flex-grow text-left min-w-0"
+                      >
+                        <div className="w-14 h-14 rounded-2xl overflow-hidden ring-2 ring-slate-700 group-hover:ring-sky-500/50 transition-all flex-shrink-0 bg-slate-800">
+                          {following.profilePic ? (
+                            <img
+                              src={following.profilePic}
+                              alt={following.displayName}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <User className="w-7 h-7 text-slate-400" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-grow text-left min-w-0">
+                          <h4 className="font-bold text-slate-100 text-lg group-hover:text-sky-300 transition-colors truncate">
+                            {following.displayName || 'Music Enthusiast'}
+                          </h4>
+                          <p className="text-sm text-slate-400 font-medium">
+                            {following.followers?.length || 0} followers
+                          </p>
+                        </div>
+                      </button>
+                      {isOwnProfile && (
+                        <button
+                          type="button"
+                          onClick={() => handleUnfollowFromList(following)}
+                          disabled={followListActionId === following.id}
+                          className="shrink-0 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-red-500/10 hover:border-red-400/40 hover:text-red-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {followListActionId === following.id ? 'Unfollowing…' : 'Unfollow'}
+                        </button>
+                      )}
+                    </div>
                   ))}
                 </div>
               )}
@@ -1720,24 +1936,24 @@ const ProfilePage = () => {
       {/* Profile Picture Viewer Modal */}
       {showProfilePicModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden border border-indigo-200">
+          <div className="bg-zinc-900/95 backdrop-blur-2xl rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden border border-white/10">
             {/* Modal Header */}
-            <div className="bg-gradient-to-r from-indigo-50 via-purple-50 to-pink-50 border-b border-indigo-100 px-6 py-5 flex items-center justify-between">
-              <h2 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
+            <div className="bg-zinc-900 border-b border-white/10 px-6 py-5 flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-zinc-100">
                 Profile Picture
               </h2>
               <button
                 onClick={() => setShowProfilePicModal(false)}
-                className="p-2 hover:bg-indigo-100 rounded-2xl transition-all"
+                className="p-2 hover:bg-white/10 rounded-2xl transition-all"
               >
-                <X className="w-6 h-6 text-gray-600" />
+                <X className="w-6 h-6 text-zinc-300" />
               </button>
             </div>
 
             {/* Image Display - Circular Cropped View */}
-            <div className="p-8 flex items-center justify-center bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50">
-              <div className="relative w-80 h-80 bg-gradient-to-tr from-indigo-600 via-purple-600 to-pink-600 rounded-full p-2 shadow-2xl">
-                <div className="w-full h-full rounded-full overflow-hidden bg-white flex items-center justify-center">
+            <div className="p-8 flex items-center justify-center bg-zinc-950">
+              <div className="relative w-80 h-80 bg-gradient-to-tr from-sky-400 via-blue-500 to-cyan-400 rounded-full p-2 shadow-2xl">
+                <div className="w-full h-full rounded-full overflow-hidden bg-zinc-900 flex items-center justify-center">
                   {userProfile.profilePic ? (
                     <img
                       src={userProfile.profilePic}
@@ -1745,7 +1961,7 @@ const ProfilePage = () => {
                       className="w-full h-full object-cover"
                     />
                   ) : (
-                    <User className="w-32 h-32 text-indigo-400" />
+                    <User className="w-32 h-32 text-sky-300" />
                   )}
                 </div>
               </div>
@@ -1753,16 +1969,16 @@ const ProfilePage = () => {
 
             {/* Action Buttons */}
             {isOwnProfile && (
-              <div className="bg-white border-t border-indigo-100 px-6 py-5 flex justify-end gap-3">
+              <div className="bg-zinc-900 border-t border-white/10 px-6 py-5 flex justify-end gap-3">
                 <button
                   onClick={() => setShowProfilePicModal(false)}
-                  className="px-6 py-3 text-gray-700 hover:bg-gray-100 rounded-2xl font-semibold transition-all border border-gray-200"
+                  className="px-6 py-3 text-zinc-200 hover:bg-white/10 rounded-2xl font-semibold transition-all border border-white/10"
                 >
                   Close
                 </button>
                 <button
                   onClick={handleChangeProfilePic}
-                  className="px-6 py-3 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-700 hover:via-purple-700 hover:to-pink-700 text-white rounded-2xl font-semibold transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
+                  className="px-6 py-3 bg-sky-600 hover:bg-sky-500 text-white rounded-2xl font-semibold transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
                 >
                   <Camera className="w-5 h-5" />
                   Change Picture
@@ -1776,22 +1992,22 @@ const ProfilePage = () => {
       {/* Banner Viewer Modal */}
       {showBannerModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl w-full max-w-4xl overflow-hidden border border-indigo-200">
+          <div className="bg-zinc-900/95 backdrop-blur-2xl rounded-3xl shadow-2xl w-full max-w-4xl overflow-hidden border border-white/10">
             {/* Modal Header */}
-            <div className="bg-gradient-to-r from-indigo-50 via-purple-50 to-pink-50 border-b border-indigo-100 px-6 py-5 flex items-center justify-between">
-              <h2 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
+            <div className="bg-zinc-900 border-b border-white/10 px-6 py-5 flex items-center justify-between">
+              <h2 className="text-2xl font-bold text-zinc-100">
                 Banner Image
               </h2>
               <button
                 onClick={() => setShowBannerModal(false)}
-                className="p-2 hover:bg-indigo-100 rounded-2xl transition-all"
+                className="p-2 hover:bg-white/10 rounded-2xl transition-all"
               >
-                <X className="w-6 h-6 text-gray-600" />
+                <X className="w-6 h-6 text-zinc-300" />
               </button>
             </div>
 
             {/* Image Display */}
-            <div className="p-8 flex items-center justify-center bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50">
+            <div className="p-8 flex items-center justify-center bg-zinc-950">
               {userProfile.bannerImage ? (
                 <img
                   src={userProfile.bannerImage}
@@ -1799,7 +2015,7 @@ const ProfilePage = () => {
                   className="max-w-full max-h-[70vh] object-contain rounded-3xl shadow-2xl"
                 />
               ) : (
-                <div className="w-full h-64 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-3xl flex items-center justify-center">
+                <div className="w-full h-64 bg-gradient-to-r from-sky-500 via-blue-500 to-cyan-500 rounded-3xl flex items-center justify-center">
                   <ImageIcon className="w-32 h-32 text-white/50" />
                 </div>
               )}
@@ -1807,16 +2023,16 @@ const ProfilePage = () => {
 
             {/* Action Buttons */}
             {isOwnProfile && (
-              <div className="bg-white border-t border-indigo-100 px-6 py-5 flex justify-end gap-3">
+              <div className="bg-zinc-900 border-t border-white/10 px-6 py-5 flex justify-end gap-3">
                 <button
                   onClick={() => setShowBannerModal(false)}
-                  className="px-6 py-3 text-gray-700 hover:bg-gray-100 rounded-2xl font-semibold transition-all border border-gray-200"
+                  className="px-6 py-3 text-zinc-200 hover:bg-white/10 rounded-2xl font-semibold transition-all border border-white/10"
                 >
                   Close
                 </button>
                 <button
                   onClick={handleChangeBanner}
-                  className="px-6 py-3 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-700 hover:via-purple-700 hover:to-pink-700 text-white rounded-2xl font-semibold transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
+                  className="px-6 py-3 bg-sky-600 hover:bg-sky-500 text-white rounded-2xl font-semibold transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
                 >
                   <Camera className="w-5 h-5" />
                   Change Banner
@@ -1830,10 +2046,10 @@ const ProfilePage = () => {
       {/* Image Crop Modal */}
       {showCropModal && (
         <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl w-full max-w-5xl my-8 border border-indigo-200">
+          <div className="bg-zinc-900/95 backdrop-blur-2xl rounded-3xl shadow-2xl w-full max-w-5xl my-8 border border-white/10">
             {/* Modal Header */}
-            <div className="bg-gradient-to-r from-indigo-50 via-purple-50 to-pink-50 border-b border-indigo-100 px-6 py-4 flex items-center justify-between">
-              <h2 className="text-xl font-bold bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 bg-clip-text text-transparent">
+            <div className="bg-zinc-900 border-b border-white/10 px-6 py-4 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-zinc-100">
                 {cropType === 'profile' ? 'Crop Profile Picture' : 'Crop Banner'}
               </h2>
               <button
@@ -1841,9 +2057,9 @@ const ProfilePage = () => {
                   setShowCropModal(false);
                   setImageToCrop(null);
                 }}
-                className="p-2 hover:bg-indigo-100 rounded-2xl transition-all"
+                className="p-2 hover:bg-white/10 rounded-2xl transition-all"
               >
-                <X className="w-6 h-6 text-gray-600" />
+                <X className="w-6 h-6 text-zinc-300" />
               </button>
             </div>
 
@@ -1862,9 +2078,9 @@ const ProfilePage = () => {
             </div>
 
             {/* Controls */}
-            <div className="bg-gradient-to-r from-indigo-50 via-purple-50 to-pink-50 px-6 py-4">
+            <div className="bg-zinc-900 px-6 py-4">
               <div className="mb-4">
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="block text-sm font-semibold text-zinc-300 mb-2">
                   Zoom
                 </label>
                 <input
@@ -1874,7 +2090,7 @@ const ProfilePage = () => {
                   step={0.1}
                   value={zoom}
                   onChange={(e) => setZoom(Number(e.target.value))}
-                  className="w-full h-2 bg-indigo-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-sky-500"
                 />
               </div>
 
@@ -1885,14 +2101,14 @@ const ProfilePage = () => {
                     setShowCropModal(false);
                     setImageToCrop(null);
                   }}
-                  className="px-6 py-3 text-gray-700 hover:bg-white rounded-2xl font-semibold transition-all border border-gray-300"
+                  className="px-6 py-3 text-zinc-200 hover:bg-white/10 rounded-2xl font-semibold transition-all border border-white/10"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={cropType === 'profile' ? handleCroppedProfilePic : handleCroppedBanner}
                   disabled={isCropping}
-                  className="px-6 py-3 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-700 hover:via-purple-700 hover:to-pink-700 text-white rounded-2xl font-semibold transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  className="px-6 py-3 bg-sky-600 hover:bg-sky-500 text-white rounded-2xl font-semibold transition-all shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {isCropping ? (
                     <>
@@ -1935,7 +2151,7 @@ const ProfilePage = () => {
           </button>
 
           {/* Main Container - Image on Left, Details on Right */}
-          <div className="w-full max-w-6xl h-full sm:h-[90vh] bg-white sm:rounded-2xl overflow-hidden shadow-2xl flex flex-col md:flex-row">
+          <div className="w-full max-w-6xl h-full sm:h-[90vh] bg-zinc-900 sm:rounded-2xl overflow-hidden shadow-2xl flex flex-col md:flex-row border border-white/10">
             {/* Left Side - Image */}
             <div className="flex-1 bg-black flex items-center justify-center relative min-h-[40vh] md:min-h-0">
               {viewerPosts[currentPostIndex]?.imageUrl ? (
@@ -1979,11 +2195,11 @@ const ProfilePage = () => {
             </div>
 
             {/* Right Side - Post Details */}
-            <div className="w-full md:w-[400px] flex flex-col bg-white max-h-[60vh] md:max-h-full">
+            <div className="w-full md:w-[400px] flex flex-col bg-zinc-900 max-h-[60vh] md:max-h-full">
               {/* Header with User Info */}
-              <div className="p-4 border-b border-gray-200">
+              <div className="p-4 border-b border-white/10">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center overflow-hidden">
+                  <div className="w-12 h-12 rounded-full bg-gradient-to-br from-sky-400 to-cyan-500 flex items-center justify-center overflow-hidden">
                     {userProfile.profilePic ? (
                       <img src={userProfile.profilePic} alt="Profile" className="w-full h-full object-cover" />
                     ) : (
@@ -1991,8 +2207,8 @@ const ProfilePage = () => {
                     )}
                   </div>
                   <div>
-                    <p className="font-bold text-gray-900">{userProfile?.displayName || 'User'}</p>
-                    <p className="text-xs text-gray-500">
+                    <p className="font-bold text-zinc-100">{userProfile?.displayName || 'User'}</p>
+                    <p className="text-xs text-zinc-500">
                       {viewerPosts[currentPostIndex]?.timestamp?.toDate().toLocaleDateString('en-US', {
                         month: 'short',
                         day: 'numeric',
@@ -2005,8 +2221,8 @@ const ProfilePage = () => {
 
               {/* Caption */}
               {viewerPosts[currentPostIndex]?.content && (
-                <div className="p-4 border-b border-gray-200">
-                  <p className="text-gray-800 text-sm leading-relaxed whitespace-pre-wrap">
+                <div className="p-4 border-b border-white/10">
+                  <p className="text-zinc-200 text-sm leading-relaxed whitespace-pre-wrap">
                     {viewerPosts[currentPostIndex].content}
                   </p>
                 </div>
@@ -2017,7 +2233,7 @@ const ProfilePage = () => {
                 {viewerPosts[currentPostIndex]?.comments && viewerPosts[currentPostIndex].comments.length > 0 ? (
                   viewerPosts[currentPostIndex].comments.map((comment, idx) => (
                     <div key={idx} className="flex gap-3">
-                      <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 bg-gradient-to-br from-indigo-400 to-pink-400">
+                      <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0 bg-gradient-to-br from-sky-400 to-cyan-500">
                         {comment.userProfilePic ? (
                           <img src={comment.userProfilePic} alt={comment.userName} className="w-full h-full object-cover" />
                         ) : (
@@ -2025,11 +2241,11 @@ const ProfilePage = () => {
                         )}
                       </div>
                       <div className="flex-1">
-                        <div className="bg-gray-100 rounded-2xl px-3 py-2">
-                          <p className="font-semibold text-sm text-gray-900">{comment.userName}</p>
-                          <p className="text-sm text-gray-800">{comment.text}</p>
+                        <div className="bg-zinc-800 rounded-2xl px-3 py-2">
+                          <p className="font-semibold text-sm text-zinc-100">{comment.userName}</p>
+                          <p className="text-sm text-zinc-300">{comment.text}</p>
                         </div>
-                        <p className="text-xs text-gray-500 mt-1 ml-3">
+                        <p className="text-xs text-zinc-500 mt-1 ml-3">
                           {new Date(comment.timestamp).toLocaleString('en-US', {
                             month: 'short',
                             day: 'numeric',
@@ -2042,37 +2258,72 @@ const ProfilePage = () => {
                   ))
                 ) : (
                   <div className="text-center py-8">
-                    <MessageCircle className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-                    <p className="text-gray-500 text-sm">No comments yet</p>
+                    <MessageCircle className="w-12 h-12 text-zinc-700 mx-auto mb-2" />
+                    <p className="text-zinc-500 text-sm">No comments yet</p>
                   </div>
                 )}
               </div>
 
-              {/* Action Buttons */}
-              <div className="p-4 border-t border-gray-200 bg-gray-50">
-                <div className="flex items-center justify-around mb-3">
-                  <button
-                    onClick={() => {
-                      loadLikesList(viewerPosts[currentPostIndex]);
-                      setShowLikesModal(true);
+              {/* Add a comment */}
+              <div className="px-4 pt-3 border-t border-white/10">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={viewerCommentText}
+                    onChange={(e) => setViewerCommentText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !submittingViewerComment) {
+                        handleAddViewerComment(viewerPosts[currentPostIndex]);
+                      }
                     }}
-                    className="flex items-center gap-2 px-4 py-2 hover:bg-gray-200 rounded-xl transition-all group"
+                    placeholder="Write a comment..."
+                    className="flex-1 px-4 py-2.5 rounded-2xl border border-white/10 bg-white/5 text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-sky-400 transition-colors"
+                  />
+                  <button
+                    onClick={() => handleAddViewerComment(viewerPosts[currentPostIndex])}
+                    disabled={submittingViewerComment || !viewerCommentText.trim()}
+                    className="p-2.5 rounded-2xl bg-sky-600 hover:bg-sky-500 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
-                    <Heart className={`w-5 h-5 ${
-                      viewerPosts[currentPostIndex]?.likes?.includes(currentUserId)
-                        ? 'fill-pink-500 text-pink-500'
-                        : 'text-gray-600 group-hover:text-pink-500'
-                    }`} />
-                    <span className="text-sm font-semibold text-gray-700">
-                      {viewerPosts[currentPostIndex]?.likes?.length || 0}
-                    </span>
+                    {submittingViewerComment ? (
+                      <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent" />
+                    ) : (
+                      <Send className="w-5 h-5" />
+                    )}
                   </button>
-                  <button className="flex items-center gap-2 px-4 py-2 hover:bg-gray-200 rounded-xl transition-all">
-                    <MessageCircle className="w-5 h-5 text-gray-600" />
-                    <span className="text-sm font-semibold text-gray-700">
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="p-4 border-t border-white/10 bg-zinc-900">
+                <div className="flex items-center justify-around mb-3">
+                  <div className="flex items-center gap-2 px-4 py-2 rounded-xl hover:bg-white/5 transition-all">
+                    <button
+                      onClick={() => handleLikeViewerPost(viewerPosts[currentPostIndex].id)}
+                      className="group"
+                    >
+                      <Heart className={`w-5 h-5 transition-colors ${
+                        viewerPosts[currentPostIndex]?.likes?.includes(currentUserId)
+                          ? 'fill-pink-500 text-pink-500'
+                          : 'text-zinc-400 group-hover:text-pink-500'
+                      }`} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        loadLikesList(viewerPosts[currentPostIndex]);
+                        setShowLikesModal(true);
+                      }}
+                      className="text-sm font-semibold text-zinc-200 hover:text-white hover:underline"
+                    >
+                      {viewerPosts[currentPostIndex]?.likes?.length || 0}
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 px-4 py-2">
+                    <MessageCircle className="w-5 h-5 text-zinc-400" />
+                    <span className="text-sm font-semibold text-zinc-200">
                       {viewerPosts[currentPostIndex]?.comments?.length || 0}
                     </span>
-                  </button>
+                  </div>
                   <button
                     onClick={() => {
                       const postLink = `${window.location.origin}/post/${viewerPosts[currentPostIndex].id}`;
@@ -2082,12 +2333,12 @@ const ProfilePage = () => {
                         alert('Failed to copy link');
                       });
                     }}
-                    className="flex items-center gap-2 px-4 py-2 hover:bg-gray-200 rounded-xl transition-all"
+                    className="flex items-center gap-2 px-4 py-2 hover:bg-white/5 rounded-xl transition-all"
                   >
-                    <Share2 className="w-5 h-5 text-gray-600" />
+                    <Share2 className="w-5 h-5 text-zinc-400" />
                   </button>
                 </div>
-                <p className="text-xs text-center text-gray-500">Scroll to view more posts</p>
+                <p className="text-xs text-center text-zinc-500">Scroll to view more posts</p>
               </div>
             </div>
           </div>
@@ -2097,15 +2348,15 @@ const ProfilePage = () => {
       {/* Likes Modal */}
       {showLikesModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-hidden">
+          <div className="bg-zinc-900 rounded-3xl shadow-2xl w-full max-w-md max-h-[80vh] overflow-hidden border border-white/10">
             {/* Modal Header */}
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-900">Likes</h2>
+            <div className="sticky top-0 bg-zinc-900 border-b border-white/10 px-6 py-4 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-zinc-100">Likes</h2>
               <button
                 onClick={() => setShowLikesModal(false)}
-                className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                className="p-2 hover:bg-white/10 rounded-full transition-colors"
               >
-                <X className="w-5 h-5 text-gray-600" />
+                <X className="w-5 h-5 text-zinc-300" />
               </button>
             </div>
 
@@ -2121,9 +2372,9 @@ const ProfilePage = () => {
                         setShowPostViewer(false);
                         navigate(`/user-profile/${user.id}`);
                       }}
-                      className="flex items-center gap-3 p-3 hover:bg-gray-50 rounded-2xl cursor-pointer transition-all"
+                      className="flex items-center gap-3 p-3 hover:bg-white/5 rounded-2xl cursor-pointer transition-all"
                     >
-                      <div className="w-12 h-12 rounded-full overflow-hidden bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center">
+                      <div className="w-12 h-12 rounded-full overflow-hidden bg-gradient-to-br from-sky-400 to-cyan-500 flex items-center justify-center">
                         {user.profilePic ? (
                           <img src={user.profilePic} alt={user.displayName} className="w-full h-full object-cover" />
                         ) : (
@@ -2131,9 +2382,9 @@ const ProfilePage = () => {
                         )}
                       </div>
                       <div>
-                        <p className="font-semibold text-gray-900">{user.displayName}</p>
+                        <p className="font-semibold text-zinc-100">{user.displayName}</p>
                         {user.bio && (
-                          <p className="text-sm text-gray-500 line-clamp-1">{user.bio}</p>
+                          <p className="text-sm text-zinc-500 line-clamp-1">{user.bio}</p>
                         )}
                       </div>
                     </div>
@@ -2141,8 +2392,8 @@ const ProfilePage = () => {
                 </div>
               ) : (
                 <div className="text-center py-12">
-                  <Heart className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-                  <p className="text-gray-500">No likes yet</p>
+                  <Heart className="w-12 h-12 text-zinc-700 mx-auto mb-2" />
+                  <p className="text-zinc-500">No likes yet</p>
                 </div>
               )}
             </div>

@@ -19,6 +19,7 @@ const UserProfilePage = lazy(() => import("./pages/UserProfilePage"));
 const AddResource = lazy(() => import("./pages/AddResource"));
 const ManageResources = lazy(() => import("./pages/ManageResources"));
 const UsersPage = lazy(() => import("./pages/UsersPage"));
+const HashtagsPage = lazy(() => import("./pages/HashtagsPage"));
 const MessagesPage = lazy(() => import("./pages/MessagesPage"));
 const CoursesPage = lazy(() => import("./pages/CoursesPage"));
 const CoursePage = lazy(() => import("./pages/CoursePage"));
@@ -78,6 +79,7 @@ function App() {
 
             {/* Social Network Routes */}
             <Route path="/users" element={user ? <UsersPage /> : <Navigate to="/login" />} />
+            <Route path="/hashtags" element={user ? <HashtagsPage /> : <Navigate to="/login" />} />
             <Route path="/messages" element={user ? <MessagesPage /> : <Navigate to="/login" />} />
             <Route path="/post/:postId" element={user ? <PostDetailPage /> : <Navigate to="/login" />} />
 
