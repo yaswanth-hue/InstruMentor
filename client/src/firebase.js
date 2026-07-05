@@ -28,7 +28,7 @@ import {
   writeBatch,
   increment
 } from "firebase/firestore";
-import { getDatabase } from "firebase/database"; // ✅ Import Realtime Database
+import { getDatabase } from "firebase/database"; // Import Realtime Database
 import { getStorage, ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 
 // Firebase config
@@ -48,8 +48,8 @@ const app = initializeApp(firebaseConfig);
 // Firebase services
 const auth = getAuth(app);
 const db = getFirestore(app);
-const rtdb = getDatabase(app); // ✅ Initialize RTDB
-const storage = getStorage(app); // ✅ Initialize Storage for course materials/videos
+const rtdb = getDatabase(app); //  Initialize RTDB
+const storage = getStorage(app); //  Initialize Storage for course materials/videos
 
 // Auth providers
 const googleProvider = new GoogleAuthProvider();
@@ -684,7 +684,7 @@ const deleteExpiredStories = async () => {
   return querySnapshot.docs.length;
 };
 
-// ✅ Export RTDB as well
+// Export RTDB as well
 export {
   auth,
   db,
