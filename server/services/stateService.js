@@ -4,8 +4,7 @@ const memoryState = {
     messages: new Map(),
     sessions: new Map(),
     lockedRooms: new Map(),
-    meetings: new Map(),
-    progress: new Map()
+    meetings: new Map()
 };
 
 export const stateService = {
@@ -128,13 +127,4 @@ export const stateService = {
         return updatedMeeting;
     },
 
-    async getProgress(userId, meetingId) {
-        const key = `${userId}_${meetingId}`;
-        return memoryState.progress.get(key) ?? null;
-    },
-
-    async saveProgress(userId, meetingId, progressData) {
-        const key = `${userId}_${meetingId}`;
-        memoryState.progress.set(key, progressData);
-    }
 };

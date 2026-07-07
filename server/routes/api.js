@@ -21,8 +21,6 @@ router.get('/courses/:courseId/meetings', meetingController.getCourseMeetings);
 router.get('/meetings/:meetingId', meetingController.getMeeting);
 router.post('/meetings/:meetingId/start', meetingController.startMeeting);
 router.post('/meetings/:meetingId/end', meetingController.endMeeting);
-router.post('/meetings/:meetingId/progress', meetingController.saveProgress);
-router.get('/courses/:courseId/progress/:userId', meetingController.getCourseProgress);
 router.post('/meetings/:meetingId/check-access', meetingController.checkAccess);
 
 export default router;

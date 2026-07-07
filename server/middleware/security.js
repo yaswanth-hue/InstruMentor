@@ -211,7 +211,7 @@ export const corsOptions = {
  */
 export const securityLogger = (req, res, next) => {
   const timestamp = new Date().toISOString();
-  const ip = req.ip || req.connection.remoteAddress;
+  const ip = req.ip || req.socket?.remoteAddress;
 
   // Log suspicious patterns
   const suspiciousPatterns = [

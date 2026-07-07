@@ -99,61 +99,6 @@ export const endMeeting = async (req, res) => {
     res.json({ success: true, message: 'Meeting ended' });
 };
 
-export const saveProgress = async (req, res) => {
-    const { meetingId } = req.params;
-    const { userId, watchedDuration, totalDuration, completed } = req.body;
-
-    const progressData = {
-        userId,
-        meetingId,
-        watchedDuration,
-        totalDuration,
-        completed: completed || false,
-        progressPercentage: Math.round((watchedDuration / totalDuration) * 100),
-        lastWatched: new Date().toISOString()
-    };
-
-    await stateService.saveProgress(userId, meetingId, progressData);
-    res.json(progressData);
-};
-
-export const getCourseProgress = async (req, res) => {
-    const { courseId, userId } = req.params;
-    const meetings = await stateService.getMeetings(courseId);
-
-    const progressPromises = meetings.map(async (meeting) => {
-        const userProgress = await stateService.getProgress(userId, meeting.id);
-
-        return {
-            meetingId: meeting.id,
-            meetingTitle: meeting.title,
-            scheduledTime: meeting.scheduledTime,
-            hasRecording: !!meeting.recordingUrl,
-            progress: userProgress || {
-                userId,
-                meetingId: meeting.id,
-                watchedDuration: 0,
-                totalDuration: 0,
-                completed: false,
-                progressPercentage: 0
-            }
-        };
-    });
-
-    const progressList = await Promise.all(progressPromises);
-
-    res.json({
-        courseId,
-        userId,
-        totalMeetings: meetings.length,
-        completedMeetings: progressList.filter(p => p.progress.completed).length,
-        overallProgress: progressList.length > 0
-            ? Math.round(progressList.reduce((sum, p) => sum + p.progress.progressPercentage, 0) / progressList.length)
-            : 0,
-        meetings: progressList
-    });
-};
-
 export const checkAccess = async (req, res) => {
     const { meetingId } = req.params;
     const { userEmail, userId } = req.body;
