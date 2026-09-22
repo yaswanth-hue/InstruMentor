@@ -11,7 +11,6 @@ import {
   MonitorOff,
   MessageSquare,
   Users,
-  Settings,
   MoreVertical,
   UserX,
   Volume2,
@@ -93,7 +92,6 @@ const VideoMeetingRoom = () => {
   // UI State
   const [showChat, setShowChat] = useState(false);
   const [showParticipants, setShowParticipants] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
   const [messageInput, setMessageInput] = useState('');
   const [selectedRecipient, setSelectedRecipient] = useState('everyone'); // 'everyone' or userId
@@ -103,6 +101,13 @@ const VideoMeetingRoom = () => {
   const [raisedHands, setRaisedHands] = useState([]); // array of userIds with raised hands
   const [participantSearch, setParticipantSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(0);
+  // Tracks whether the viewport is at/below Tailwind's `sm` breakpoint
+  // (640px), so the grid's JS-computed column count (inline styles can't
+  // use sm:/md: classes) matches the same breakpoint the rest of the UI
+  // already uses.
+  const [isMobileViewport, setIsMobileViewport] = useState(
+    typeof window !== 'undefined' ? window.innerWidth < 640 : false
+  );
   const [availableDevices, setAvailableDevices] = useState({ audio: [], video: [] });
   const [selectedAudioDevice, setSelectedAudioDevice] = useState('');
   const [selectedVideoDevice, setSelectedVideoDevice] = useState('');
@@ -502,6 +507,15 @@ const VideoMeetingRoom = () => {
       socket.off('screen-share-denied');
     };
   }, [meeting, loading, error, isHost, meetingId, hasJoined]);
+
+  // Keep isMobileViewport in sync with actual window width, so the video
+  // grid's column count updates on rotation/resize instead of only ever
+  // reflecting the width at first render.
+  useEffect(() => {
+    const handleResize = () => setIsMobileViewport(window.innerWidth < 640);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -1397,7 +1411,7 @@ const VideoMeetingRoom = () => {
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden min-h-0 min-w-0">
         {/* Video Grid */}
-        <div className="flex-1 flex items-center justify-center overflow-auto min-h-0 min-w-0">
+        <div className="flex-1 flex items-center justify-center overflow-hidden min-h-0 min-w-0">
           {(() => {
             const nonBlockedParticipants = participants.filter(p =>
               p.userId !== auth.currentUser?.uid && !blockedUsers.includes(p.userId)
@@ -1518,36 +1532,41 @@ const VideoMeetingRoom = () => {
             // Calculate total visible participants
             const totalVisible = (showLocal ? 1 : 0) + currentParticipants.length;
 
-            // Determine grid layout based on number of participants.
-            // Fixed pixel row heights (auto-rows-[400px], etc.) previously
-            // ignored viewport size entirely, which is a big part of why
-            // this looked broken on mobile — a 400px-tall tile on a phone
-            // screen pushes everything else off-screen. minmax() with a
-            // small floor lets rows shrink to fit small viewports while
-            // still growing to fill space on larger ones. The 3-4 person
-            // case also used to force 2 columns unconditionally, which
-            // squeezed each square tile into a narrow, letterboxed strip
-            // on small phones — it now stacks to 1 column below the sm
-            // breakpoint, same as the 2-person case already did.
-            let gridClass = 'grid gap-2 sm:gap-4 w-full p-2 sm:p-4';
+            // Determine grid layout based on number of participants. The
+            // grid must always fit inside the available space with no
+            // scrolling, so rows are sized as an even 1fr split of
+            // whatever height is actually available (repeat(rows, 1fr))
+            // rather than a fixed pixel or minmax() floor — a floor can
+            // add up to more than the container's real height once there
+            // are enough rows, which is exactly what was forcing a
+            // scrollbar before. Each tile's own aspect-ratio box (set in
+            // the tile markup below) shrinks to fit its cell instead of
+            // being cropped or distorted.
+            let columns;
             if (totalVisible === 1) {
-              gridClass += ' grid-cols-1 auto-rows-[minmax(200px,1fr)]';
+              columns = 1;
             } else if (totalVisible === 2) {
-              gridClass += ' grid-cols-1 md:grid-cols-2 auto-rows-[minmax(180px,1fr)]';
+              columns = isMobileViewport ? 1 : 2;
             } else if (totalVisible <= 4) {
-              gridClass += ' grid-cols-1 sm:grid-cols-2 auto-rows-[minmax(160px,1fr)]';
+              columns = 2;
             } else if (totalVisible <= 6) {
-              gridClass += ' grid-cols-2 md:grid-cols-3 auto-rows-[minmax(120px,1fr)]';
+              columns = isMobileViewport ? 2 : 3;
             } else {
-              gridClass += ' grid-cols-2 md:grid-cols-3 lg:grid-cols-3 auto-rows-[minmax(110px,1fr)]';
+              columns = isMobileViewport ? 2 : 3;
             }
+            const rows = Math.max(1, Math.ceil(totalVisible / columns));
+            const gridClass = 'grid gap-2 sm:gap-4 w-full h-full p-2 sm:p-4';
+            const gridStyle = {
+              gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+              gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`
+            };
 
             return (
               <>
-                <div className={gridClass}>
+                <div className={gridClass} style={gridStyle}>
                   {/* Local Video - only on first page */}
                   {showLocal && (
-                    <div className="w-full h-full flex items-center justify-center p-1 sm:p-2">
+                    <div className="w-full h-full min-h-0 min-w-0 flex items-center justify-center p-1 sm:p-2">
                       <div style={{ aspectRatio: '1/1', width: 'auto', height: '100%', maxWidth: '100%' }} className="relative bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl overflow-hidden shadow-2xl border border-gray-700 group">
                         <video
                           ref={localVideoRef}
@@ -1574,16 +1593,16 @@ const VideoMeetingRoom = () => {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
                           </svg>
                         </button>
-                      <div className="absolute bottom-2 left-2 bg-black/50 px-3 py-1 rounded text-white text-sm">
-                        You {isMuted && <MicOff className="inline w-4 h-4 ml-1" />}
+                      <div className="absolute bottom-1 left-1 sm:bottom-2 sm:left-2 bg-black/50 px-1.5 sm:px-3 py-0.5 sm:py-1 rounded text-white text-xs sm:text-sm">
+                        You {isMuted && <MicOff className="inline w-3 h-3 sm:w-4 sm:h-4 ml-1" />}
                       </div>
                       {raisedHands.includes(auth.currentUser?.uid) && (
-                        <div className="absolute top-2 left-2 bg-yellow-500 px-2 py-1 rounded text-white">
-                          <Hand className="w-4 h-4" />
+                        <div className="absolute top-1 left-1 sm:top-2 sm:left-2 bg-yellow-500 p-1 sm:px-2 sm:py-1 rounded text-white">
+                          <Hand className="w-3 h-3 sm:w-4 sm:h-4" />
                         </div>
                       )}
                       {reactions[auth.currentUser?.uid] && (
-                        <div className="absolute top-2 right-2 text-4xl animate-bounce">
+                        <div className="absolute top-1 right-1 sm:top-2 sm:right-2 text-xl sm:text-4xl animate-bounce">
                           {reactions[auth.currentUser?.uid].type}
                         </div>
                       )}
@@ -1880,40 +1899,6 @@ const VideoMeetingRoom = () => {
         )}
 
         {/* Settings Panel - Host Permissions Only */}
-        {showSettings && isHost && (
-          <div className="absolute bottom-full right-2 sm:right-6 mb-2 bg-gray-700 rounded-lg p-4 w-[calc(100vw-1rem)] max-w-72 shadow-lg z-20">
-            <h3 className="text-white font-medium mb-3">Participant Permissions</h3>
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 text-sm text-gray-300">
-                <input
-                  type="checkbox"
-                  checked={permissionsSettings.allowReactions}
-                  onChange={(e) => handleUpdatePermissions({ ...permissionsSettings, allowReactions: e.target.checked })}
-                  className="rounded"
-                />
-                Allow reactions
-              </label>
-              <label className="flex items-center gap-2 text-sm text-gray-300">
-                <input
-                  type="checkbox"
-                  checked={permissionsSettings.allowUnmute}
-                  onChange={(e) => handleUpdatePermissions({ ...permissionsSettings, allowUnmute: e.target.checked })}
-                  className="rounded"
-                />
-                Allow unmute
-              </label>
-              <label className="flex items-center gap-2 text-sm text-gray-300">
-                <input
-                  type="checkbox"
-                  checked={permissionsSettings.allowVideo}
-                  onChange={(e) => handleUpdatePermissions({ ...permissionsSettings, allowVideo: e.target.checked })}
-                  className="rounded"
-                />
-                Allow video
-              </label>
-            </div>
-          </div>
-        )}
 
         <div className="flex items-center justify-start sm:justify-center gap-2 sm:gap-3 w-full min-w-max sm:min-w-0 px-1 overflow-x-auto">
           {/* Microphone with Device Menu */}
@@ -2052,18 +2037,6 @@ const VideoMeetingRoom = () => {
             <Users className="w-5 h-5" />
           </button>
 
-          {/* Settings */}
-          <button
-            onClick={() => isHost && setShowSettings(!showSettings)}
-            disabled={!isHost}
-            className={`p-3 sm:p-4 rounded-full text-white transition-colors ${
-              isHost ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-700/50 cursor-not-allowed opacity-50'
-            }`}
-            title={isHost ? 'Settings' : 'Only the host can change settings'}
-          >
-            <Settings className="w-5 h-5" />
-          </button>
-
           {isHost && (
             <button
               onClick={handleEndMeeting}
@@ -2118,7 +2091,7 @@ const RemoteVideo = ({ participant, stream, isHost, onMute, onKick, onBlock, rea
   const fillsParent = isMainStage || compact;
 
   return (
-    <div className={fillsParent ? "w-full h-full flex items-center justify-center" : "w-full h-full flex items-center justify-center p-1 sm:p-2"}>
+    <div className={fillsParent ? "w-full h-full min-h-0 min-w-0 flex items-center justify-center" : "w-full h-full min-h-0 min-w-0 flex items-center justify-center p-1 sm:p-2"}>
       <div
         style={fillsParent ? undefined : { aspectRatio: '1/1', width: 'auto', height: '100%', maxWidth: '100%' }}
         className={`relative bg-gradient-to-br from-gray-800 to-gray-900 overflow-hidden shadow-2xl border border-gray-700 group w-full h-full ${isMainStage ? 'rounded-none sm:rounded-xl' : 'rounded-xl'}`}
@@ -2142,28 +2115,28 @@ const RemoteVideo = ({ participant, stream, isHost, onMute, onKick, onBlock, rea
           </div>
         )}
 
-      <div className="absolute bottom-2 left-2 bg-black/50 px-3 py-1 rounded text-white text-sm flex items-center gap-2">
+      <div className={`absolute bottom-1 left-1 sm:bottom-2 sm:left-2 bg-black/50 rounded text-white flex items-center gap-1 sm:gap-2 ${compact ? 'px-1.5 py-0.5 text-[10px] max-w-[85%] truncate' : 'px-1.5 sm:px-3 py-0.5 sm:py-1 text-xs sm:text-sm max-w-[85%] truncate'}`}>
         {participant.userName}
-        {participant.isMuted && <MicOff className="w-4 h-4" />}
+        {participant.isMuted && <MicOff className={compact ? 'w-3 h-3 flex-shrink-0' : 'w-3 h-3 sm:w-4 sm:h-4 flex-shrink-0'} />}
       </div>
 
       {/* Raised Hand */}
       {handRaised && (
-        <div className="absolute top-2 left-2 bg-yellow-500 px-2 py-1 rounded text-white">
-          <Hand className="w-4 h-4" />
+        <div className={`absolute top-1 left-1 sm:top-2 sm:left-2 bg-yellow-500 rounded text-white ${compact ? 'p-1' : 'p-1 sm:px-2 sm:py-1'}`}>
+          <Hand className={compact ? 'w-3 h-3' : 'w-3 h-3 sm:w-4 sm:h-4'} />
         </div>
       )}
 
       {/* Reaction */}
       {reaction && (
-        <div className="absolute top-2 right-2 text-4xl animate-bounce">
+        <div className={`absolute top-1 right-1 sm:top-2 sm:right-2 animate-bounce ${compact ? 'text-lg' : 'text-xl sm:text-4xl'}`}>
           {reaction.type}
         </div>
       )}
 
-      {participant.isScreenSharing && (
-        <div className="absolute bottom-2 right-2 bg-green-600 px-2 py-1 rounded text-white text-xs">
-          Sharing Screen
+      {participant.isScreenSharing && !isMainStage && (
+        <div className={`absolute bottom-1 right-1 sm:bottom-2 sm:right-2 bg-green-600 rounded text-white ${compact ? 'px-1 py-0.5 text-[9px]' : 'px-1 sm:px-2 py-0.5 sm:py-1 text-[9px] sm:text-xs'}`}>
+          {compact ? 'Sharing' : 'Sharing Screen'}
         </div>
       )}
 
