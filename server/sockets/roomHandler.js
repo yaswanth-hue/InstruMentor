@@ -142,13 +142,26 @@ export const registerRoomHandlers = (io, socket) => {
     socket.on('share-screen', async ({ roomId, userId, isSharing }) => {
         const participants = await stateService.getParticipants(roomId);
         const participant = participants.find(p => p.userId === userId);
+        if (!participant) return;
 
-        if (participant) {
-            participant.isScreenSharing = isSharing;
-            await stateService.addParticipant(roomId, participant);
-            io.to(roomId).emit('participant-screen-share', { userId, isSharing });
-            io.to(roomId).emit('participants-updated', participants);
+        if (isSharing) {
+            // Only one presenter at a time — without this, two people
+            // starting a share around the same time could both end up
+            // flagged isScreenSharing: true, and the "main stage" on the
+            // client would never resolve back to the normal grid because
+            // it always finds *someone* still marked as sharing, even
+            // after the person who clicked "stop" has genuinely stopped.
+            const existingSharer = participants.find(p => p.isScreenSharing && p.userId !== userId);
+            if (existingSharer) {
+                socket.emit('screen-share-denied', { activeSharerName: existingSharer.userName });
+                return;
+            }
         }
+
+        participant.isScreenSharing = isSharing;
+        await stateService.addParticipant(roomId, participant);
+        io.to(roomId).emit('participant-screen-share', { userId, isSharing });
+        io.to(roomId).emit('participants-updated', participants);
     });
 
     socket.on('raise-hand', async ({ roomId, userId, raised }) => {

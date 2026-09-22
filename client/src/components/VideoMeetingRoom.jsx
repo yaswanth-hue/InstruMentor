@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import io from 'socket.io-client';
 import {
@@ -72,6 +72,16 @@ const VideoMeetingRoom = () => {
   // Participants
   const [participants, setParticipants] = useState([]);
   const [socketConnected, setSocketConnected] = useState(false);
+
+  // Whichever remote participant currently has isScreenSharing set. Kept as
+  // a single derived value (not separate state) so every place that needs
+  // "is someone else presenting right now" — the layout switch and the
+  // srcObject re-attach effect above — reads the same answer instead of
+  // each computing it slightly differently and drifting out of sync.
+  const remoteSharerActive = useMemo(
+    () => participants.some(p => p.userId !== auth.currentUser?.uid && p.isScreenSharing),
+    [participants]
+  );
 
   // Media State
   const [isMuted, setIsMuted] = useState(true);
@@ -388,6 +398,24 @@ const VideoMeetingRoom = () => {
       );
     });
 
+    // Server-side rejection when someone else started sharing a moment
+    // earlier (see the share-screen handler's single-presenter check).
+    // getDisplayMedia() has already succeeded locally by the time this can
+    // arrive, so roll that back cleanly instead of leaving a capture
+    // running that nobody else will ever see.
+    socket.on('screen-share-denied', ({ activeSharerName }) => {
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach(track => track.stop());
+        screenStreamRef.current = null;
+      }
+      setScreenStream(null);
+      if (localScreenVideoRef.current) {
+        localScreenVideoRef.current.srcObject = null;
+      }
+      setIsScreenSharing(false);
+      alert(`${activeSharerName || 'Someone else'} is already sharing their screen.`);
+    });
+
     socket.on('host-action', ({ action, message }) => {
       alert(message);
       if (action === 'muted') {
@@ -471,6 +499,7 @@ const VideoMeetingRoom = () => {
       socket.off('duplicate-session');
       socket.off('action-error');
       socket.off('participant-screen-share');
+      socket.off('screen-share-denied');
     };
   }, [meeting, loading, error, isHost, meetingId, hasJoined]);
 
@@ -478,6 +507,26 @@ const VideoMeetingRoom = () => {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
+
+  // Re-attach the local camera/screen previews whenever the layout swaps
+  // between the normal grid and the screen-share "main stage" view. Both
+  // layouts render their own <video> with ref={localVideoRef} (grid tile
+  // vs. filmstrip thumbnail), so switching between them unmounts one
+  // <video> element and mounts a new one — srcObject is a plain DOM
+  // property, not React state, so the new element starts out with no
+  // stream at all until something reassigns it. That's why the local
+  // camera preview would go blank after stopping a share (remote peers
+  // were unaffected because their view of you goes over the peer
+  // connection, not through this element) — nothing was reattaching your
+  // camera stream to the freshly-mounted video element.
+  useEffect(() => {
+    if (localVideoRef.current && localStreamRef.current) {
+      localVideoRef.current.srcObject = localStreamRef.current;
+    }
+    if (isScreenSharing && localScreenVideoRef.current && screenStreamRef.current) {
+      localScreenVideoRef.current.srcObject = screenStreamRef.current;
+    }
+  }, [isScreenSharing, remoteSharerActive]);
 
   // Get available devices
   useEffect(() => {
@@ -846,6 +895,17 @@ const VideoMeetingRoom = () => {
         isSharing: false
       });
     } else {
+      // Only one presenter at a time, mirroring how Zoom/Meet work. Check
+      // client-side first so we don't even prompt the OS screen-picker
+      // when someone else is already presenting; the server enforces the
+      // same rule (see share-screen handler) to cover the race where two
+      // people click share within moments of each other.
+      const activeSharer = participants.find(p => p.userId !== auth.currentUser?.uid && p.isScreenSharing);
+      if (activeSharer) {
+        alert(`${activeSharer.userName} is already sharing their screen. Only one person can share at a time.`);
+        return;
+      }
+
       // Start screen sharing
       try {
         const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
@@ -1309,7 +1369,7 @@ const VideoMeetingRoom = () => {
   }
 
   return (
-    <div className="h-screen bg-gray-900 flex flex-col overflow-hidden" style={{width: '100%', maxWidth: 'none'}}>
+    <div className="bg-gray-900 flex flex-col overflow-hidden" style={{width: '100%', maxWidth: 'none', height: '100svh'}}>
       {/* Header */}
       <div className="bg-gray-800 px-3 sm:px-6 py-2 sm:py-3 border-b border-gray-700 flex-shrink-0">
         <div className="flex items-center justify-between gap-2">
@@ -1395,7 +1455,7 @@ const VideoMeetingRoom = () => {
 
                   {/* Filmstrip — everyone's camera, including your own,
                       stays visible but small while the stage is active. */}
-                  <div className="flex flex-row lg:flex-col gap-2 overflow-x-auto lg:overflow-y-auto lg:overflow-x-hidden flex-shrink-0 lg:w-40 xl:w-48 max-h-28 lg:max-h-none">
+                  <div className="flex flex-row lg:flex-col gap-2 overflow-x-auto lg:overflow-y-auto lg:overflow-x-hidden flex-shrink-0 lg:w-40 xl:w-48 max-h-28 lg:max-h-none lg:h-full">
                     <div className="w-24 sm:w-28 lg:w-full aspect-video flex-shrink-0">
                       <div className="relative w-full h-full rounded-lg overflow-hidden bg-gradient-to-br from-gray-800 to-gray-900 border border-gray-700 group">
                         <video
@@ -1440,6 +1500,7 @@ const VideoMeetingRoom = () => {
                           onBlock={() => handleBlockUser(participant.userId)}
                           reaction={reactions[participant.userId]}
                           handRaised={raisedHands.includes(participant.userId)}
+                          compact
                         />
                       </div>
                     ))}
@@ -1463,14 +1524,18 @@ const VideoMeetingRoom = () => {
             // this looked broken on mobile — a 400px-tall tile on a phone
             // screen pushes everything else off-screen. minmax() with a
             // small floor lets rows shrink to fit small viewports while
-            // still growing to fill space on larger ones.
+            // still growing to fill space on larger ones. The 3-4 person
+            // case also used to force 2 columns unconditionally, which
+            // squeezed each square tile into a narrow, letterboxed strip
+            // on small phones — it now stacks to 1 column below the sm
+            // breakpoint, same as the 2-person case already did.
             let gridClass = 'grid gap-2 sm:gap-4 w-full p-2 sm:p-4';
             if (totalVisible === 1) {
               gridClass += ' grid-cols-1 auto-rows-[minmax(200px,1fr)]';
             } else if (totalVisible === 2) {
               gridClass += ' grid-cols-1 md:grid-cols-2 auto-rows-[minmax(180px,1fr)]';
             } else if (totalVisible <= 4) {
-              gridClass += ' grid-cols-2 auto-rows-[minmax(140px,1fr)]';
+              gridClass += ' grid-cols-1 sm:grid-cols-2 auto-rows-[minmax(160px,1fr)]';
             } else if (totalVisible <= 6) {
               gridClass += ' grid-cols-2 md:grid-cols-3 auto-rows-[minmax(120px,1fr)]';
             } else {
@@ -2025,7 +2090,7 @@ const VideoMeetingRoom = () => {
 };
 
 // Remote Video Component
-const RemoteVideo = ({ participant, stream, isHost, onMute, onKick, onBlock, reaction, handRaised, isMainStage = false }) => {
+const RemoteVideo = ({ participant, stream, isHost, onMute, onKick, onBlock, reaction, handRaised, isMainStage = false, compact = false }) => {
   const videoRef = useRef(null);
   const audioRef = useRef(null);
   const [showMenu, setShowMenu] = useState(false);
@@ -2039,11 +2104,24 @@ const RemoteVideo = ({ participant, stream, isHost, onMute, onKick, onBlock, rea
     }
   }, [stream]);
 
+  // Three layout modes:
+  // - grid (default): a free-floating square tile, sized by content — used
+  //   in the normal equal-grid view.
+  // - isMainStage: fills its parent completely (the large presenter view).
+  // - compact: also fills its parent completely, but keeps the small
+  //   rounded-corner filmstrip look. Previously the filmstrip tiles reused
+  //   the default "grid" mode, which force-applies aspectRatio: 1/1 via
+  //   inline style — that fought with the aspect-video wrapper the
+  //   filmstrip already puts each tile in, so a tile ended up constrained
+  //   to two different, conflicting shapes at once and rendered squashed
+  //   or cropped depending on the browser.
+  const fillsParent = isMainStage || compact;
+
   return (
-    <div className={isMainStage ? "w-full h-full flex items-center justify-center" : "w-full h-full flex items-center justify-center p-1 sm:p-2"}>
+    <div className={fillsParent ? "w-full h-full flex items-center justify-center" : "w-full h-full flex items-center justify-center p-1 sm:p-2"}>
       <div
-        style={isMainStage ? undefined : { aspectRatio: '1/1', width: 'auto', height: '100%', maxWidth: '100%' }}
-        className={`relative bg-gradient-to-br from-gray-800 to-gray-900 overflow-hidden shadow-2xl border border-gray-700 group ${isMainStage ? 'w-full h-full rounded-none sm:rounded-xl' : 'rounded-xl'}`}
+        style={fillsParent ? undefined : { aspectRatio: '1/1', width: 'auto', height: '100%', maxWidth: '100%' }}
+        className={`relative bg-gradient-to-br from-gray-800 to-gray-900 overflow-hidden shadow-2xl border border-gray-700 group w-full h-full ${isMainStage ? 'rounded-none sm:rounded-xl' : 'rounded-xl'}`}
       >
         {/* Audio element (always present for audio playback) */}
         <audio ref={audioRef} autoPlay playsInline />
@@ -2058,7 +2136,7 @@ const RemoteVideo = ({ participant, stream, isHost, onMute, onKick, onBlock, rea
         />
         {(!stream || (!participant.hasVideo && !participant.isScreenSharing)) && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className={`${isMainStage ? 'w-24 h-24 text-3xl' : 'w-20 h-20 text-2xl'} bg-purple-600 rounded-full flex items-center justify-center text-white font-bold`}>
+            <div className={`${isMainStage ? 'w-24 h-24 text-3xl' : compact ? 'w-8 h-8 sm:w-10 sm:h-10 text-sm' : 'w-20 h-20 text-2xl'} bg-purple-600 rounded-full flex items-center justify-center text-white font-bold`}>
               {participant.userName?.[0] || 'U'}
             </div>
           </div>

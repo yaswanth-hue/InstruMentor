@@ -433,12 +433,21 @@ export const getMeetings = async (courseId) => {
   );
   const querySnapshot = await getDocs(q);
   const meetings = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-  
-  // Sort on the client side to avoid index requirement
+
+  // Sort on the client side to avoid index requirement. Newest-created
+  // meeting first, so a meeting just scheduled on the course page shows up
+  // at the top of the list instead of at the bottom (createdAt is set once
+  // at creation via serverTimestamp() and never changes, unlike
+  // scheduledTime, which the host picks and can be any date). Falls back
+  // to scheduledTime only for the rare document with no createdAt.
   return meetings.sort((a, b) => {
+    const createdA = a.createdAt?.toDate ? a.createdAt.toDate() : (a.createdAt ? new Date(a.createdAt) : null);
+    const createdB = b.createdAt?.toDate ? b.createdAt.toDate() : (b.createdAt ? new Date(b.createdAt) : null);
+    if (createdA && createdB) return createdB - createdA;
+
     const dateA = a.scheduledTime?.toDate ? a.scheduledTime.toDate() : new Date(a.scheduledTime);
     const dateB = b.scheduledTime?.toDate ? b.scheduledTime.toDate() : new Date(b.scheduledTime);
-    return dateA - dateB;
+    return dateB - dateA;
   });
 };
 
