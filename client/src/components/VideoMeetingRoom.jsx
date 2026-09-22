@@ -126,6 +126,37 @@ const VideoMeetingRoom = () => {
     sdpSemantics: 'unified-plan'
   };
 
+  // Bumps the Opus audio bitrate in an SDP offer/answer. The previous
+  // version did `sdp.replace('useinbandfec=1', 'useinbandfec=1; maxaverage...')`,
+  // which produces an `a=fmtp` line with `; ` (semicolon + space) between
+  // parameters. Real fmtp parameter lists use a bare `;` with no space
+  // (e.g. `minptime=10;useinbandfec=1;stereo=1`) — the space is enough to
+  // make several browsers' SDP parsers reject the whole description when
+  // it's handed to setLocalDescription/setRemoteDescription. Because that
+  // call was wrapped in try/catch with only a console.error, the failure
+  // was silent: the offer/answer was never actually applied or sent, so
+  // no media connection ever formed even though signaling looked fine.
+  // This version only touches a line it can find and edits it with the
+  // correct separator; if the line isn't present, it leaves the SDP
+  // untouched instead of guessing.
+  const boostOpusAudio = (sdp) => {
+    try {
+      return sdp.replace(
+        /(a=fmtp:\d+ .*useinbandfec=1)([^\r\n]*)/,
+        (match, base, rest) => {
+          const extra = 'maxaveragebitrate=128000;stereo=1;maxplaybackrate=48000';
+          // Avoid double-appending if this SDP already carries the params
+          // (e.g. a re-offer built from a previous description).
+          if (rest.includes('maxaveragebitrate')) return match;
+          return `${base};${extra}${rest}`;
+        }
+      );
+    } catch (err) {
+      console.error('Error adjusting SDP, using original offer/answer:', err);
+      return sdp;
+    }
+  };
+
   // Load meeting data
   useEffect(() => {
     const loadMeetingData = async () => {
@@ -343,6 +374,12 @@ const VideoMeetingRoom = () => {
       );
     });
 
+    socket.on('participant-screen-share', ({ userId: sharingUserId, isSharing }) => {
+      setParticipants(prev =>
+        prev.map(p => p.userId === sharingUserId ? { ...p, isScreenSharing: isSharing } : p)
+      );
+    });
+
     socket.on('host-action', ({ action, message }) => {
       alert(message);
       if (action === 'muted') {
@@ -425,6 +462,7 @@ const VideoMeetingRoom = () => {
       socket.off('chat-history');
       socket.off('duplicate-session');
       socket.off('action-error');
+      socket.off('participant-screen-share');
     };
   }, [meeting, loading, error, isHost, meetingId, hasJoined]);
 
@@ -489,6 +527,19 @@ const VideoMeetingRoom = () => {
         }));
       };
 
+      // Surface connection failures instead of leaving media silently
+      // stuck — previously there was no visibility into whether a peer
+      // connection actually completed, so a dead connection looked
+      // identical (in the UI) to one still negotiating.
+      pc.oniceconnectionstatechange = () => {
+        console.log(`ICE connection state with ${targetUserId}:`, pc.iceConnectionState);
+        if (pc.iceConnectionState === 'failed') {
+          // A single ICE restart attempt often recovers a connection that
+          // failed due to a transient network blip.
+          pc.restartIce?.();
+        }
+      };
+
       // Renegotiate whenever tracks change after the initial connection is
       // up — e.g. someone turns their camera on after joining with it off.
       // Without this, addTrack() only adds the track locally; the remote
@@ -517,10 +568,7 @@ const VideoMeetingRoom = () => {
       // Modify SDP to prefer Opus codec with higher bitrate
       const modifiedOffer = {
         ...offer,
-        sdp: offer.sdp.replace(
-          'useinbandfec=1',
-          'useinbandfec=1; maxaveragebitrate=128000; stereo=1; maxplaybackrate=48000'
-        )
+        sdp: boostOpusAudio(offer.sdp)
       };
 
       await pc.setLocalDescription(modifiedOffer);
@@ -575,6 +623,15 @@ const VideoMeetingRoom = () => {
           }));
         };
 
+        // Same reasoning as createPeerConnection above: make failures
+        // visible instead of a permanently silent, stuck connection.
+        pc.oniceconnectionstatechange = () => {
+          console.log(`ICE connection state with ${fromUserId}:`, pc.iceConnectionState);
+          if (pc.iceConnectionState === 'failed') {
+            pc.restartIce?.();
+          }
+        };
+
         // Same reasoning as createPeerConnection: ignore the
         // negotiationneeded event fired by the initial addTrack calls
         // (the offer/answer we're already handling below covers that),
@@ -598,15 +655,13 @@ const VideoMeetingRoom = () => {
       }
 
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      await flushPendingCandidates(pc);
       const answer = await pc.createAnswer();
 
       // Modify SDP for higher audio quality
       const modifiedAnswer = {
         ...answer,
-        sdp: answer.sdp.replace(
-          'useinbandfec=1',
-          'useinbandfec=1; maxaveragebitrate=128000; stereo=1; maxplaybackrate=48000'
-        )
+        sdp: boostOpusAudio(answer.sdp)
       };
 
       await pc.setLocalDescription(modifiedAnswer);
@@ -629,6 +684,7 @@ const VideoMeetingRoom = () => {
       const pc = peerConnectionsRef.current[fromUserId];
       if (pc) {
         await pc.setRemoteDescription(new RTCSessionDescription(answer));
+        await flushPendingCandidates(pc);
       }
     } catch (err) {
       console.error('Error handling answer:', err);
@@ -638,11 +694,41 @@ const VideoMeetingRoom = () => {
   const handleIceCandidate = async (fromUserId, candidate) => {
     try {
       const pc = peerConnectionsRef.current[fromUserId];
-      if (pc) {
-        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      if (!pc) return;
+
+      // ICE candidates from the other side can arrive (and often do,
+      // over a fast local network) before setRemoteDescription() has
+      // finished running here — addIceCandidate() throws in that state.
+      // The old code let that throw straight into the catch below and
+      // silently dropped the candidate, which could leave a connection
+      // without enough candidates to ever complete, even though the
+      // offer/answer exchange itself succeeded. Queue anything that
+      // arrives too early and flush it once the remote description is set.
+      if (!pc.remoteDescription || !pc.remoteDescription.type) {
+        if (!pc._pendingCandidates) pc._pendingCandidates = [];
+        pc._pendingCandidates.push(candidate);
+        return;
       }
+
+      await pc.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (err) {
       console.error('Error handling ICE candidate:', err);
+    }
+  };
+
+  // Applies any ICE candidates that arrived before the remote description
+  // was set (see handleIceCandidate above). Call this right after every
+  // successful setRemoteDescription().
+  const flushPendingCandidates = async (pc) => {
+    if (!pc._pendingCandidates || pc._pendingCandidates.length === 0) return;
+    const queued = pc._pendingCandidates;
+    pc._pendingCandidates = [];
+    for (const candidate of queued) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (err) {
+        console.error('Error applying queued ICE candidate:', err);
+      }
     }
   };
 
@@ -730,6 +816,18 @@ const VideoMeetingRoom = () => {
       }
       setIsScreenSharing(false);
 
+      // Restore the camera video track (if any) on every connection that
+      // was showing the screen share, so peers see the camera again
+      // instead of a frozen last frame or a blank sender.
+      const camTrack = localStreamRef.current?.getVideoTracks()[0] || null;
+      Object.values(peerConnectionsRef.current).forEach(pc => {
+        const sender = pc.getSenders().find(s => s.track?.kind === 'video' || s._isScreenShareSender);
+        if (sender) {
+          sender.replaceTrack(camTrack);
+          sender._isScreenShareSender = false;
+        }
+      });
+
       socket.emit('share-screen', {
         roomId: meetingId,
         userId: auth.currentUser?.uid,
@@ -743,16 +841,26 @@ const VideoMeetingRoom = () => {
         setScreenStream(stream);
         setIsScreenSharing(true);
 
-        // Replace video track in all peer connections
+        const screenTrack = stream.getVideoTracks()[0];
+
+        // If someone joined with their camera off, no video sender ever
+        // existed on these connections (getSenders().find(...video) was
+        // silently returning undefined, so replaceTrack() was never even
+        // called and peers got nothing). Add the screen track as a new
+        // sender in that case instead of dropping the share.
         Object.values(peerConnectionsRef.current).forEach(pc => {
           const sender = pc.getSenders().find(s => s.track?.kind === 'video');
           if (sender) {
-            sender.replaceTrack(stream.getVideoTracks()[0]);
+            sender.replaceTrack(screenTrack);
+            sender._isScreenShareSender = true;
+          } else {
+            const newSender = pc.addTrack(screenTrack, stream);
+            newSender._isScreenShareSender = true;
           }
         });
 
         // Handle when user stops sharing via browser UI
-        stream.getVideoTracks()[0].onended = () => {
+        screenTrack.onended = () => {
           handleScreenShare();
         };
 
@@ -1335,7 +1443,7 @@ const VideoMeetingRoom = () => {
 
         {/* Sidebar - Chat/Participants */}
         {(showChat || showParticipants) && (
-          <div className="fixed sm:static inset-0 sm:inset-auto z-30 sm:z-auto w-full sm:w-80 bg-gray-800 border-l border-gray-700 flex flex-col overflow-hidden">
+          <div className="fixed sm:static inset-0 sm:inset-auto z-30 sm:z-auto w-full sm:w-80 bg-gray-800 border-l border-gray-700 flex flex-col overflow-hidden min-h-0">
             {/* Sidebar Tabs */}
             <div className="flex border-b border-gray-700">
               <button
@@ -1358,7 +1466,7 @@ const VideoMeetingRoom = () => {
 
             {/* Chat Panel */}
             {showChat && (
-              <div className="flex-1 flex flex-col">
+              <div className="flex-1 flex flex-col min-h-0">
                 {/* Chat Header with Controls */}
                 <div className="p-3 border-b border-gray-700">
                   <div className="flex items-center justify-between mb-2">
@@ -1397,35 +1505,57 @@ const VideoMeetingRoom = () => {
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                  {chatMessages.length === 0 && (
-                    <div className="text-gray-400 text-sm text-center mt-4">
-                      No messages yet. Start the conversation!
-                    </div>
-                  )}
-                  {chatMessages
-                    .filter(msg => {
-                      // Show public messages to everyone
-                      if (msg.messageType === 'public') return true;
-                      // Show private messages if user is sender or recipient
-                      if (msg.messageType === 'private') {
-                        return msg.userId === auth.currentUser?.uid || msg.recipientId === auth.currentUser?.uid;
+                  {(() => {
+                    const myId = auth.currentUser?.uid;
+                    // Each recipient gets its own thread instead of one
+                    // shared feed with a "(Private)" tag mixed in: picking
+                    // "Everyone" shows the public thread, picking a
+                    // participant shows only the 1:1 conversation with
+                    // them. The messages themselves were already scoped to
+                    // this user server-side (see chat-history above); this
+                    // just splits them into separate windows instead of
+                    // one interleaved list.
+                    const threadMessages = chatMessages.filter(msg => {
+                      if (selectedRecipient === 'everyone') {
+                        return msg.messageType === 'public';
                       }
-                      return true;
-                    })
-                    .map((msg, idx) => (
-                      <div key={idx} className={`text-sm ${msg.messageType === 'private' ? 'bg-gray-700/50 p-2 rounded' : ''}`}>
-                        <div className="flex items-center gap-2">
-                          <div className="font-medium text-purple-400">{msg.userName}</div>
-                          {msg.messageType === 'private' && (
-                            <span className="text-xs text-yellow-400">(Private)</span>
-                          )}
-                        </div>
-                        <div className="text-gray-300">{msg.message}</div>
-                        <div className="text-xs text-gray-500">
-                          {new Date(msg.createdAt).toLocaleTimeString()}
-                        </div>
-                      </div>
-                    ))}
+                      return msg.messageType === 'private' && (
+                        (msg.userId === myId && msg.recipientId === selectedRecipient) ||
+                        (msg.userId === selectedRecipient && msg.recipientId === myId)
+                      );
+                    });
+                    const recipientName = selectedRecipient === 'everyone'
+                      ? null
+                      : participants.find(p => p.userId === selectedRecipient)?.userName || 'participant';
+
+                    return (
+                      <>
+                        {recipientName && (
+                          <div className="text-xs text-yellow-400 text-center pb-1 border-b border-gray-700/50">
+                            Private conversation with {recipientName}
+                          </div>
+                        )}
+                        {threadMessages.length === 0 && (
+                          <div className="text-gray-400 text-sm text-center mt-4">
+                            {recipientName
+                              ? `No messages with ${recipientName} yet. Say hi!`
+                              : 'No messages yet. Start the conversation!'}
+                          </div>
+                        )}
+                        {threadMessages.map((msg, idx) => (
+                          <div key={msg.id ?? idx} className={`text-sm ${msg.messageType === 'private' ? 'bg-gray-700/50 p-2 rounded' : ''}`}>
+                            <div className="flex items-center gap-2">
+                              <div className="font-medium text-purple-400">{msg.userName}</div>
+                            </div>
+                            <div className="text-gray-300">{msg.message}</div>
+                            <div className="text-xs text-gray-500">
+                              {new Date(msg.createdAt).toLocaleTimeString()}
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    );
+                  })()}
                   <div ref={chatEndRef} />
                 </div>
                 <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-700">
@@ -1450,7 +1580,7 @@ const VideoMeetingRoom = () => {
 
             {/* Participants Panel */}
             {showParticipants && (
-              <div className="flex-1 flex flex-col">
+              <div className="flex-1 flex flex-col min-h-0">
                 {/* Participant Search */}
                 <div className="p-3 border-b border-gray-700">
                   <input
@@ -1791,9 +1921,9 @@ const RemoteVideo = ({ participant, stream, isHost, onMute, onKick, onBlock, rea
           playsInline
           muted
           className="w-full h-full object-cover"
-          style={{ display: (stream && participant.hasVideo) ? 'block' : 'none' }}
+          style={{ display: (stream && (participant.hasVideo || participant.isScreenSharing)) ? 'block' : 'none' }}
         />
-        {(!stream || !participant.hasVideo) && (
+        {(!stream || (!participant.hasVideo && !participant.isScreenSharing)) && (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="w-20 h-20 bg-purple-600 rounded-full flex items-center justify-center text-white text-2xl font-bold">
               {participant.userName?.[0] || 'U'}

@@ -72,8 +72,20 @@ export const registerRoomHandlers = (io, socket) => {
         const participants = await stateService.getParticipants(roomId);
         socket.emit('participants-updated', participants);
 
-        const messages = await stateService.getMessages(roomId);
-        socket.emit('chat-history', messages);
+        // Only send this participant the messages relevant to them: public
+        // messages, plus private messages where they're the sender or the
+        // recipient. Previously the raw, unfiltered room message list was
+        // sent to every joiner — every private DM anyone had ever sent in
+        // the room, from and to other people, landed in each client's own
+        // chat state and was only hidden by a filter in the render code.
+        // That's not a real boundary (visible in devtools/state) and reads
+        // as one big shared window instead of separate conversations.
+        const allMessages = await stateService.getMessages(roomId);
+        const visibleMessages = allMessages.filter(msg => {
+            if (msg.messageType !== 'private') return true;
+            return msg.userId === userId || msg.recipientId === userId;
+        });
+        socket.emit('chat-history', visibleMessages);
 
         const meeting = await stateService.getMeeting(roomId);
         if (meeting) {
@@ -115,6 +127,26 @@ export const registerRoomHandlers = (io, socket) => {
             participant.hasVideo = hasVideo;
             await stateService.addParticipant(roomId, participant);
             io.to(roomId).emit('participant-video-toggled', { userId, hasVideo });
+            io.to(roomId).emit('participants-updated', participants);
+        }
+    });
+
+    // Screen share. The client already renegotiates the actual video
+    // track over the peer connection on its own; this just lets everyone
+    // else know a share started/stopped so the UI (badge, video visibility)
+    // reflects it. This event previously had no server-side listener at
+    // all, so it was emitted into the void — nobody else ever learned a
+    // participant was screen sharing, and the "Sharing Screen" badge and
+    // the video element (which is gated on hasVideo/isScreenSharing) never
+    // updated for anyone but the presenter.
+    socket.on('share-screen', async ({ roomId, userId, isSharing }) => {
+        const participants = await stateService.getParticipants(roomId);
+        const participant = participants.find(p => p.userId === userId);
+
+        if (participant) {
+            participant.isScreenSharing = isSharing;
+            await stateService.addParticipant(roomId, participant);
+            io.to(roomId).emit('participant-screen-share', { userId, isSharing });
             io.to(roomId).emit('participants-updated', participants);
         }
     });
