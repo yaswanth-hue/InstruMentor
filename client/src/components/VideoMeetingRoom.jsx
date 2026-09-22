@@ -112,6 +112,14 @@ const VideoMeetingRoom = () => {
 
   // Refs
   const localVideoRef = useRef(null);
+  // Separate ref for the local screen-share preview. Previously there was
+  // no dedicated element for this — the code only called replaceTrack() on
+  // the outgoing peer-connection senders, so remote viewers eventually got
+  // the screen track, but the sharer's own tile kept showing
+  // localVideoRef's srcObject (the camera stream), which never changed.
+  // That's the "stuck" preview: you were simply never looking at your own
+  // share, only at whatever the camera was last showing.
+  const localScreenVideoRef = useRef(null);
   const localStreamRef = useRef(null);
   const screenStreamRef = useRef(null);
   const peerConnectionsRef = useRef({});
@@ -814,6 +822,10 @@ const VideoMeetingRoom = () => {
         screenStreamRef.current.getTracks().forEach(track => track.stop());
         screenStreamRef.current = null;
       }
+      setScreenStream(null);
+      if (localScreenVideoRef.current) {
+        localScreenVideoRef.current.srcObject = null;
+      }
       setIsScreenSharing(false);
 
       // Restore the camera video track (if any) on every connection that
@@ -840,6 +852,12 @@ const VideoMeetingRoom = () => {
         screenStreamRef.current = stream;
         setScreenStream(stream);
         setIsScreenSharing(true);
+
+        // Play the live screen stream in its own preview element instead
+        // of leaving the local tile stuck on the camera feed.
+        if (localScreenVideoRef.current) {
+          localScreenVideoRef.current.srcObject = stream;
+        }
 
         const screenTrack = stream.getVideoTracks()[0];
 
@@ -1293,34 +1311,143 @@ const VideoMeetingRoom = () => {
   return (
     <div className="h-screen bg-gray-900 flex flex-col overflow-hidden" style={{width: '100%', maxWidth: 'none'}}>
       {/* Header */}
-      <div className="bg-gray-800 px-3 sm:px-6 py-3 border-b border-gray-700 flex-shrink-0">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
+      <div className="bg-gray-800 px-3 sm:px-6 py-2 sm:py-3 border-b border-gray-700 flex-shrink-0">
+        <div className="flex items-center justify-between gap-2">
           <div className="text-white min-w-0">
-            <h1 className="text-base sm:text-lg font-semibold truncate">{meeting?.title}</h1>
-            <p className="text-sm text-gray-400 truncate">{course?.title}</p>
+            <h1 className="text-sm sm:text-lg font-semibold truncate">{meeting?.title}</h1>
+            <p className="text-xs sm:text-sm text-gray-400 truncate">{course?.title}</p>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
             <div className={`w-2 h-2 rounded-full ${socketConnected ? 'bg-green-500' : 'bg-red-500'}`} title={socketConnected ? 'Connected' : 'Disconnected'}></div>
             {isHost && (
-              <span className="px-3 py-1 bg-purple-600 text-white text-sm rounded-full">
+              <span className="px-2 sm:px-3 py-0.5 sm:py-1 bg-purple-600 text-white text-xs sm:text-sm rounded-full whitespace-nowrap">
                 Host
               </span>
             )}
-            <span className="text-gray-400 text-sm whitespace-nowrap">
+            <span className="hidden sm:inline text-gray-400 text-sm whitespace-nowrap">
               {participants.length} participant{participants.length !== 1 ? 's' : ''}
+            </span>
+            <span className="sm:hidden text-gray-400 text-xs whitespace-nowrap">
+              {participants.length}
             </span>
           </div>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden min-h-0">
+      <div className="flex-1 flex overflow-hidden min-h-0 min-w-0">
         {/* Video Grid */}
-        <div className="flex-1 flex items-center justify-center overflow-auto">
+        <div className="flex-1 flex items-center justify-center overflow-auto min-h-0 min-w-0">
           {(() => {
             const nonBlockedParticipants = participants.filter(p =>
               p.userId !== auth.currentUser?.uid && !blockedUsers.includes(p.userId)
             );
+
+            // Real meeting apps (Zoom, Meet) give whoever is presenting a
+            // large dedicated stage instead of one equal-sized grid tile —
+            // that's what was meant by the share getting "stuck" inside a
+            // small window. Detect the current presenter (only one at a
+            // time is meaningful here, same as this app's one-video-track
+            // design) and switch layouts when someone is sharing.
+            const remoteSharer = nonBlockedParticipants.find(p => p.isScreenSharing);
+            const localIsSharing = isScreenSharing;
+            const someoneIsSharing = localIsSharing || !!remoteSharer;
+
+            if (someoneIsSharing) {
+              const filmstripParticipants = remoteSharer
+                ? nonBlockedParticipants.filter(p => p.userId !== remoteSharer.userId)
+                : nonBlockedParticipants;
+
+              return (
+                <div className="w-full h-full flex flex-col lg:flex-row gap-2 sm:gap-3 p-2 sm:p-3 min-h-0">
+                  {/* Main Stage */}
+                  <div className="flex-1 min-h-0 min-w-0 relative">
+                    {localIsSharing ? (
+                      <div className="relative w-full h-full rounded-none sm:rounded-xl overflow-hidden bg-black flex items-center justify-center border border-gray-700">
+                        <video
+                          ref={localScreenVideoRef}
+                          autoPlay
+                          muted
+                          playsInline
+                          className="w-full h-full object-contain"
+                        />
+                        <div className="absolute bottom-2 left-2 bg-black/50 px-3 py-1 rounded text-white text-sm">
+                          Your screen
+                        </div>
+                        <div className="absolute bottom-2 right-2 bg-green-600 px-2 py-1 rounded text-white text-xs">
+                          Sharing Screen
+                        </div>
+                      </div>
+                    ) : (
+                      <RemoteVideo
+                        participant={remoteSharer}
+                        stream={remoteStreams[remoteSharer.userId]}
+                        isHost={isHost}
+                        onMute={() => handleMuteParticipant(remoteSharer.userId, remoteSharer.isMuted)}
+                        onKick={() => handleKickParticipant(remoteSharer.userId)}
+                        onBlock={() => handleBlockUser(remoteSharer.userId)}
+                        reaction={reactions[remoteSharer.userId]}
+                        handRaised={raisedHands.includes(remoteSharer.userId)}
+                        isMainStage
+                      />
+                    )}
+                  </div>
+
+                  {/* Filmstrip — everyone's camera, including your own,
+                      stays visible but small while the stage is active. */}
+                  <div className="flex flex-row lg:flex-col gap-2 overflow-x-auto lg:overflow-y-auto lg:overflow-x-hidden flex-shrink-0 lg:w-40 xl:w-48 max-h-28 lg:max-h-none">
+                    <div className="w-24 sm:w-28 lg:w-full aspect-video flex-shrink-0">
+                      <div className="relative w-full h-full rounded-lg overflow-hidden bg-gradient-to-br from-gray-800 to-gray-900 border border-gray-700 group">
+                        <video
+                          ref={localVideoRef}
+                          autoPlay
+                          muted
+                          playsInline
+                          className={`w-full h-full object-cover ${mirrorVideo ? 'scale-x-[-1]' : ''}`}
+                          style={{ display: isVideoOff ? 'none' : 'block' }}
+                        />
+                        {isVideoOff && (
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <div className="w-8 h-8 sm:w-10 sm:h-10 bg-purple-600 rounded-full flex items-center justify-center text-white text-sm font-bold">
+                              {auth.currentUser?.displayName?.[0] || auth.currentUser?.email?.[0] || 'Y'}
+                            </div>
+                          </div>
+                        )}
+                        <div className="absolute bottom-1 left-1 bg-black/50 px-1.5 py-0.5 rounded text-white text-[10px] sm:text-xs">
+                          You {isMuted && <MicOff className="inline w-3 h-3 ml-0.5" />}
+                        </div>
+                        {raisedHands.includes(auth.currentUser?.uid) && (
+                          <div className="absolute top-1 left-1 bg-yellow-500 px-1 py-0.5 rounded text-white">
+                            <Hand className="w-3 h-3" />
+                          </div>
+                        )}
+                        {reactions[auth.currentUser?.uid] && (
+                          <div className="absolute top-1 right-1 text-lg sm:text-xl animate-bounce">
+                            {reactions[auth.currentUser?.uid].type}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {filmstripParticipants.map(participant => (
+                      <div key={participant.userId} className="w-24 sm:w-28 lg:w-full aspect-video flex-shrink-0">
+                        <RemoteVideo
+                          participant={participant}
+                          stream={remoteStreams[participant.userId]}
+                          isHost={isHost}
+                          onMute={() => handleMuteParticipant(participant.userId, participant.isMuted)}
+                          onKick={() => handleKickParticipant(participant.userId)}
+                          onBlock={() => handleBlockUser(participant.userId)}
+                          reaction={reactions[participant.userId]}
+                          handRaised={raisedHands.includes(participant.userId)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            }
+
             const participantsPerPage = 9;
             const totalPages = Math.ceil((nonBlockedParticipants.length + 1) / participantsPerPage);
             const startIdx = currentPage * participantsPerPage;
@@ -1330,18 +1457,24 @@ const VideoMeetingRoom = () => {
             // Calculate total visible participants
             const totalVisible = (showLocal ? 1 : 0) + currentParticipants.length;
 
-            // Determine grid layout based on number of participants
-            let gridClass = 'grid gap-4 w-full p-4';
+            // Determine grid layout based on number of participants.
+            // Fixed pixel row heights (auto-rows-[400px], etc.) previously
+            // ignored viewport size entirely, which is a big part of why
+            // this looked broken on mobile — a 400px-tall tile on a phone
+            // screen pushes everything else off-screen. minmax() with a
+            // small floor lets rows shrink to fit small viewports while
+            // still growing to fill space on larger ones.
+            let gridClass = 'grid gap-2 sm:gap-4 w-full p-2 sm:p-4';
             if (totalVisible === 1) {
-              gridClass += ' grid-cols-1 auto-rows-[400px]';
+              gridClass += ' grid-cols-1 auto-rows-[minmax(200px,1fr)]';
             } else if (totalVisible === 2) {
-              gridClass += ' grid-cols-1 md:grid-cols-2 auto-rows-[350px]';
+              gridClass += ' grid-cols-1 md:grid-cols-2 auto-rows-[minmax(180px,1fr)]';
             } else if (totalVisible <= 4) {
-              gridClass += ' grid-cols-2 auto-rows-[300px]';
+              gridClass += ' grid-cols-2 auto-rows-[minmax(140px,1fr)]';
             } else if (totalVisible <= 6) {
-              gridClass += ' grid-cols-2 md:grid-cols-3 auto-rows-[280px]';
+              gridClass += ' grid-cols-2 md:grid-cols-3 auto-rows-[minmax(120px,1fr)]';
             } else {
-              gridClass += ' grid-cols-1 md:grid-cols-2 lg:grid-cols-3 auto-rows-[250px]';
+              gridClass += ' grid-cols-2 md:grid-cols-3 lg:grid-cols-3 auto-rows-[minmax(110px,1fr)]';
             }
 
             return (
@@ -1349,7 +1482,7 @@ const VideoMeetingRoom = () => {
                 <div className={gridClass}>
                   {/* Local Video - only on first page */}
                   {showLocal && (
-                    <div className="w-full h-full flex items-center justify-center p-2">
+                    <div className="w-full h-full flex items-center justify-center p-1 sm:p-2">
                       <div style={{ aspectRatio: '1/1', width: 'auto', height: '100%', maxWidth: '100%' }} className="relative bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl overflow-hidden shadow-2xl border border-gray-700 group">
                         <video
                           ref={localVideoRef}
@@ -1387,11 +1520,6 @@ const VideoMeetingRoom = () => {
                       {reactions[auth.currentUser?.uid] && (
                         <div className="absolute top-2 right-2 text-4xl animate-bounce">
                           {reactions[auth.currentUser?.uid].type}
-                        </div>
-                      )}
-                      {isScreenSharing && (
-                        <div className="absolute bottom-2 right-2 bg-green-600 px-2 py-1 rounded text-white text-xs">
-                          Sharing Screen
                         </div>
                       )}
                       </div>
@@ -1743,7 +1871,7 @@ const VideoMeetingRoom = () => {
               <ChevronUp className="w-3 h-3 text-white" />
             </button>
             {showAudioMenu && (
-              <div className="absolute bottom-full mb-2 left-0 bg-gray-700 rounded-lg p-2 w-64 shadow-lg z-10">
+              <div className="absolute bottom-full mb-2 left-0 bg-gray-700 rounded-lg p-2 w-56 sm:w-64 max-w-[80vw] shadow-lg z-10">
                 <h4 className="text-white text-sm font-medium mb-2 px-2">Select Microphone</h4>
                 <div className="max-h-48 overflow-y-auto">
                   {availableDevices.audio.map(device => (
@@ -1785,7 +1913,7 @@ const VideoMeetingRoom = () => {
               <ChevronUp className="w-3 h-3 text-white" />
             </button>
             {showVideoMenu && (
-              <div className="absolute bottom-full mb-2 left-0 bg-gray-700 rounded-lg p-2 w-64 shadow-lg z-10">
+              <div className="absolute bottom-full mb-2 left-0 bg-gray-700 rounded-lg p-2 w-56 sm:w-64 max-w-[80vw] shadow-lg z-10">
                 <h4 className="text-white text-sm font-medium mb-2 px-2">Select Camera</h4>
                 <div className="max-h-48 overflow-y-auto">
                   {availableDevices.video.map(device => (
@@ -1874,19 +2002,21 @@ const VideoMeetingRoom = () => {
           {isHost && (
             <button
               onClick={handleEndMeeting}
-              className="px-4 sm:px-6 py-3 rounded-full bg-red-700 whitespace-nowrap hover:bg-red-800 text-white font-medium transition-colors flex items-center gap-2"
+              className="px-3 sm:px-6 py-3 rounded-full bg-red-700 whitespace-nowrap hover:bg-red-800 text-white font-medium transition-colors flex items-center gap-2"
+              title="End Meeting"
             >
               <PhoneOff className="w-5 h-5" />
-              End Meeting
+              <span className="hidden sm:inline">End Meeting</span>
             </button>
           )}
 
           <button
             onClick={handleLeave}
-            className="px-4 sm:px-6 py-3 rounded-full bg-red-600 whitespace-nowrap hover:bg-red-700 text-white font-medium transition-colors flex items-center gap-2"
+            className="px-3 sm:px-6 py-3 rounded-full bg-red-600 whitespace-nowrap hover:bg-red-700 text-white font-medium transition-colors flex items-center gap-2"
+            title="Leave"
           >
             <PhoneOff className="w-5 h-5" />
-            Leave
+            <span className="hidden sm:inline">Leave</span>
           </button>
         </div>
       </div>
@@ -1895,7 +2025,7 @@ const VideoMeetingRoom = () => {
 };
 
 // Remote Video Component
-const RemoteVideo = ({ participant, stream, isHost, onMute, onKick, onBlock, reaction, handRaised }) => {
+const RemoteVideo = ({ participant, stream, isHost, onMute, onKick, onBlock, reaction, handRaised, isMainStage = false }) => {
   const videoRef = useRef(null);
   const audioRef = useRef(null);
   const [showMenu, setShowMenu] = useState(false);
@@ -1910,8 +2040,11 @@ const RemoteVideo = ({ participant, stream, isHost, onMute, onKick, onBlock, rea
   }, [stream]);
 
   return (
-    <div className="w-full h-full flex items-center justify-center p-2">
-      <div style={{ aspectRatio: '1/1', width: 'auto', height: '100%', maxWidth: '100%' }} className="relative bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl overflow-hidden shadow-2xl border border-gray-700 group">
+    <div className={isMainStage ? "w-full h-full flex items-center justify-center" : "w-full h-full flex items-center justify-center p-1 sm:p-2"}>
+      <div
+        style={isMainStage ? undefined : { aspectRatio: '1/1', width: 'auto', height: '100%', maxWidth: '100%' }}
+        className={`relative bg-gradient-to-br from-gray-800 to-gray-900 overflow-hidden shadow-2xl border border-gray-700 group ${isMainStage ? 'w-full h-full rounded-none sm:rounded-xl' : 'rounded-xl'}`}
+      >
         {/* Audio element (always present for audio playback) */}
         <audio ref={audioRef} autoPlay playsInline />
 
@@ -1920,12 +2053,12 @@ const RemoteVideo = ({ participant, stream, isHost, onMute, onKick, onBlock, rea
           autoPlay
           playsInline
           muted
-          className="w-full h-full object-cover"
+          className={`w-full h-full ${isMainStage && participant.isScreenSharing ? 'object-contain' : 'object-cover'}`}
           style={{ display: (stream && (participant.hasVideo || participant.isScreenSharing)) ? 'block' : 'none' }}
         />
         {(!stream || (!participant.hasVideo && !participant.isScreenSharing)) && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-20 h-20 bg-purple-600 rounded-full flex items-center justify-center text-white text-2xl font-bold">
+            <div className={`${isMainStage ? 'w-24 h-24 text-3xl' : 'w-20 h-20 text-2xl'} bg-purple-600 rounded-full flex items-center justify-center text-white font-bold`}>
               {participant.userName?.[0] || 'U'}
             </div>
           </div>
